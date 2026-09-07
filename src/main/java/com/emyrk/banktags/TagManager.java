@@ -28,16 +28,16 @@ package com.emyrk.banktags;
 import com.google.common.base.Strings;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.inject.Singleton;
-import net.runelite.client.config.ConfigManager;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.game.ItemVariationMapping;
-import static com.emyrk.banktags.BankTagsPlugin.CONFIG_GROUP;
 import static com.emyrk.banktags.BankTagsPlugin.ITEM_KEY_PREFIX;
 import static com.emyrk.banktags.BankTagsPlugin.TAG_HIDDEN_PREFIX;
 import net.runelite.client.util.Text;
@@ -45,48 +45,54 @@ import net.runelite.client.util.Text;
 @Singleton
 public class TagManager
 {
-	private final ConfigManager configManager;
+	private final BankTagsStorage storage;
 	private final ItemManager itemManager;
 	private final Map<String, BankTag> customTags = new HashMap<>();
 
 	@Inject
 	private TagManager(
 		final ItemManager itemManager,
-		final ConfigManager configManager)
+		final BankTagsStorage storage)
 	{
 		this.itemManager = itemManager;
-		this.configManager = configManager;
+		this.storage = storage;
 	}
 
 	String getTagString(int itemId, boolean variation)
 	{
-		itemId = getItemId(itemId, variation);
+		return getStoredTagString(getItemId(itemId, variation));
+	}
 
-		String config = configManager.getConfiguration(CONFIG_GROUP, ITEM_KEY_PREFIX + itemId);
-		if (config == null)
-		{
-			return "";
-		}
-
-		return config;
+	private String getStoredTagString(int itemId)
+	{
+		String config = storage.getConfiguration(ITEM_KEY_PREFIX + itemId);
+		return config == null ? "" : config;
 	}
 
 	Collection<String> getTags(int itemId, boolean variation)
 	{
-		return new LinkedHashSet<>(Text.fromCSV(getTagString(itemId, variation).toLowerCase()));
+		return getStoredTags(getItemId(itemId, variation));
+	}
+
+	private Collection<String> getStoredTags(int itemId)
+	{
+		return new LinkedHashSet<>(Text.fromCSV(getStoredTagString(itemId).toLowerCase()));
 	}
 
 	void setTagString(int itemId, String tags, boolean variation)
 	{
-		itemId = getItemId(itemId, variation);
+		setStoredTagString(getItemId(itemId, variation), tags);
+	}
 
+	private void setStoredTagString(int itemId, String tags)
+	{
 		if (Strings.isNullOrEmpty(tags))
 		{
-			configManager.unsetConfiguration(CONFIG_GROUP, ITEM_KEY_PREFIX + itemId);
+			storage.unsetConfiguration(ITEM_KEY_PREFIX + itemId);
 		}
 		else
 		{
-			configManager.setConfiguration(CONFIG_GROUP, ITEM_KEY_PREFIX + itemId, tags);
+			storage.setConfiguration(ITEM_KEY_PREFIX + itemId, tags);
 		}
 	}
 
@@ -113,6 +119,24 @@ public class TagManager
 		setTagString(itemId, Text.toCSV(tags), variation);
 	}
 
+	private void addStoredTag(int itemId, String tag)
+	{
+		Collection<String> tags = getStoredTags(itemId);
+		if (tags.add(Text.standardize(tag)))
+		{
+			setStoredTagString(itemId, Text.toCSV(tags));
+		}
+	}
+
+	private void removeStoredTag(int itemId, String tag)
+	{
+		Collection<String> tags = getStoredTags(itemId);
+		if (tags.remove(Text.standardize(tag)))
+		{
+			setStoredTagString(itemId, Text.toCSV(tags));
+		}
+	}
+
 	boolean findTag(int itemId, String search)
 	{
 		Collection<String> tags = getTags(itemId, false);
@@ -122,20 +146,36 @@ public class TagManager
 
 	public List<Integer> getItemsForTag(String tag)
 	{
-		final String prefix = CONFIG_GROUP + "." + ITEM_KEY_PREFIX;
-		return configManager.getConfigurationKeys(prefix).stream()
+		final String standardizedTag = Text.standardize(tag);
+		final String prefix = storage.getActiveGroup() + "." + ITEM_KEY_PREFIX;
+		return storage.getConfigurationKeys(ITEM_KEY_PREFIX).stream()
 			.map(item -> Integer.parseInt(item.replace(prefix, "")))
-			.filter(item -> getTags(item, false).contains(tag) || getTags(item, true).contains(tag))
+			.filter(item -> getStoredTags(item).contains(standardizedTag))
 			.collect(Collectors.toList());
+	}
+
+	public void replaceItemsForTag(String tag, Collection<Integer> itemIds)
+	{
+		final String standardizedTag = Text.standardize(tag);
+		final Set<Integer> desiredItems = new HashSet<>(itemIds);
+		final Set<Integer> currentItems = new HashSet<>(getItemsForTag(standardizedTag));
+
+		currentItems.stream()
+			.filter(itemId -> !desiredItems.contains(itemId))
+			.forEach(itemId -> removeStoredTag(itemId, standardizedTag));
+
+		desiredItems.stream()
+			.filter(itemId -> !currentItems.contains(itemId))
+			.forEach(itemId -> addStoredTag(itemId, standardizedTag));
 	}
 
 	public void removeTag(String tag)
 	{
-		final String prefix = CONFIG_GROUP + "." + ITEM_KEY_PREFIX;
-		configManager.getConfigurationKeys(prefix).forEach(item ->
+		final String prefix = storage.getActiveGroup() + "." + ITEM_KEY_PREFIX;
+		storage.getConfigurationKeys(ITEM_KEY_PREFIX).forEach(item ->
 		{
 			int id = Integer.parseInt(item.replace(prefix, ""));
-			removeTag(id, tag);
+			removeStoredTag(id, tag);
 		});
 
 		setHidden(tag, false);
@@ -143,16 +183,16 @@ public class TagManager
 
 	public void removeTag(int itemId, String tag)
 	{
-		Collection<String> tags = getTags(itemId, false);
-		if (tags.remove(Text.standardize(tag)))
-		{
-			setTags(itemId, tags, false);
-		}
+		removeTag(itemId, tag, false);
+		removeTag(itemId, tag, true);
+	}
 
-		tags = getTags(itemId, true);
+	public void removeTag(int itemId, String tag, boolean variation)
+	{
+		Collection<String> tags = getTags(itemId, variation);
 		if (tags.remove(Text.standardize(tag)))
 		{
-			setTags(itemId, tags, true);
+			setTags(itemId, tags, variation);
 		}
 	}
 
@@ -161,29 +201,29 @@ public class TagManager
 		List<Integer> items = getItemsForTag(Text.standardize(oldTag));
 		items.forEach(id ->
 		{
-			Collection<String> tags = getTags(id, id < 0);
+			Collection<String> tags = getStoredTags(id);
 
 			tags.remove(Text.standardize(oldTag));
 			tags.add(Text.standardize(newTag));
 
-			setTags(id, tags, id < 0);
+			setStoredTagString(id, Text.toCSV(tags));
 		});
 	}
 
 	public boolean isHidden(String tag)
 	{
-		return Boolean.TRUE.equals(configManager.getConfiguration(CONFIG_GROUP, TAG_HIDDEN_PREFIX + Text.standardize(tag), Boolean.class));
+		return Boolean.TRUE.equals(storage.getConfiguration(TAG_HIDDEN_PREFIX + Text.standardize(tag), Boolean.class));
 	}
 
 	public void setHidden(String tag, boolean hidden)
 	{
 		if (hidden)
 		{
-			configManager.setConfiguration(CONFIG_GROUP, TAG_HIDDEN_PREFIX + Text.standardize(tag), true);
+			storage.setConfiguration(TAG_HIDDEN_PREFIX + Text.standardize(tag), true);
 		}
 		else
 		{
-			configManager.unsetConfiguration(CONFIG_GROUP, TAG_HIDDEN_PREFIX + Text.standardize(tag));
+			storage.unsetConfiguration(TAG_HIDDEN_PREFIX + Text.standardize(tag));
 		}
 	}
 

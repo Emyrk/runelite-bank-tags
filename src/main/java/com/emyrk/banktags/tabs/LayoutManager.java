@@ -65,7 +65,6 @@ import net.runelite.api.widgets.JavaScriptCallback;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.chat.QueuedMessage;
-import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.ItemManager;
@@ -81,7 +80,7 @@ import static com.emyrk.banktags.BankTagsPlugin.BANK_ITEM_START_X;
 import static com.emyrk.banktags.BankTagsPlugin.BANK_ITEM_WIDTH;
 import static com.emyrk.banktags.BankTagsPlugin.BANK_ITEM_X_PADDING;
 import static com.emyrk.banktags.BankTagsPlugin.BANK_ITEM_Y_PADDING;
-import static com.emyrk.banktags.BankTagsPlugin.CONFIG_GROUP;
+import com.emyrk.banktags.BankTagsStorage;
 import static com.emyrk.banktags.BankTagsPlugin.TAG_LAYOUT_PREFIX;
 import com.emyrk.banktags.BankTagsService;
 import static com.emyrk.banktags.tabs.TabInterface.DUPLICATE_ITEM;
@@ -100,14 +99,14 @@ public class LayoutManager
 	private final ChatMessageManager chatMessageManager;
 	private final PotionStorage potionStorage;
 	private final EventBus eventBus;
-	private final ConfigManager configManager;
+	private final BankTagsStorage storage;
 
 	private final List<PluginAutoLayout> autoLayouts = new ArrayList<>();
 
 	@Inject
 	LayoutManager(Client client, ItemManager itemManager, BankTagsPlugin plugin, ChatboxPanelManager chatboxPanelManager,
 		BankSearch bankSearch, ChatMessageManager chatMessageManager,
-		PotionStorage potionStorage, EventBus eventBus, ConfigManager configManager)
+		PotionStorage potionStorage, EventBus eventBus, BankTagsStorage storage)
 	{
 		this.client = client;
 		this.itemManager = itemManager;
@@ -117,7 +116,7 @@ public class LayoutManager
 		this.chatMessageManager = chatMessageManager;
 		this.potionStorage = potionStorage;
 		this.eventBus = eventBus;
-		this.configManager = configManager;
+		this.storage = storage;
 
 		registerAutoLayout(plugin, "Default", new DefaultLayout());
 	}
@@ -137,7 +136,7 @@ public class LayoutManager
 	@Nullable
 	public Layout loadLayout(String tag)
 	{
-		String layoutStr = configManager.getConfiguration(CONFIG_GROUP, TAG_LAYOUT_PREFIX + Text.standardize(tag));
+		String layoutStr = storage.getConfiguration(TAG_LAYOUT_PREFIX + Text.standardize(tag));
 		if (layoutStr != null)
 		{
 			List<String> layoutList = Text.fromCSV(layoutStr);
@@ -165,12 +164,34 @@ public class LayoutManager
 			}
 			sb.append(l[i]);
 		}
-		configManager.setConfiguration(CONFIG_GROUP, TAG_LAYOUT_PREFIX + Text.standardize(tag), sb.toString());
+		storage.setConfiguration(TAG_LAYOUT_PREFIX + Text.standardize(tag), sb.toString());
 	}
 
 	public void removeLayout(String tag)
 	{
-		configManager.unsetConfiguration(CONFIG_GROUP, TAG_LAYOUT_PREFIX + Text.standardize(tag));
+		storage.unsetConfiguration(TAG_LAYOUT_PREFIX + Text.standardize(tag));
+	}
+
+	public void replaceLayout(String tag, int[] layout)
+	{
+		if (layout == null)
+		{
+			removeLayout(tag);
+		}
+		else
+		{
+			saveLayout(new Layout(Text.standardize(tag), layout));
+		}
+	}
+
+	public void renameLayout(String oldTag, String newTag)
+	{
+		Layout layout = loadLayout(oldTag);
+		removeLayout(oldTag);
+		if (layout != null)
+		{
+			saveLayout(new Layout(Text.standardize(newTag), layout.getLayout()));
+		}
 	}
 
 	private void layout(Layout l)

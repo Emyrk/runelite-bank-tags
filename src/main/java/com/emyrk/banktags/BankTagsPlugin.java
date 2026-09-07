@@ -176,6 +176,12 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 		return configManager.getConfig(BankTagsConfig.class);
 	}
 
+	@Provides
+	BankTagsSyncConfig getSyncConfig(ConfigManager configManager)
+	{
+		return configManager.getConfig(BankTagsSyncConfig.class);
+	}
+
 	@Override
 	public void resetConfiguration()
 	{

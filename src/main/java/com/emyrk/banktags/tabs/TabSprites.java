@@ -32,11 +32,14 @@ import net.runelite.client.game.SpriteOverride;
 @RequiredArgsConstructor
 public enum TabSprites implements SpriteOverride
 {
-	TAB_BACKGROUND(-201, "tag-tab.png"),
-	TAB_BACKGROUND_ACTIVE(-202, "tag-tab-active.png"),
-	UP_ARROW(-203, "up-arrow.png"),
-	DOWN_ARROW(-204, "down-arrow.png"),
-	NEW_TAB(-205, "new-tab.png");
+	// These IDs must not overlap RuneLite's built-in Bank Tags sprite overrides (-201 through -205).
+	// Sprite overrides share one global map, so disabling either plugin would otherwise remove the
+	// other plugin's controls and tab backgrounds.
+	TAB_BACKGROUND(-1201, "tag-tab.png"),
+	TAB_BACKGROUND_ACTIVE(-1202, "tag-tab-active.png"),
+	UP_ARROW(-1203, "up-arrow.png"),
+	DOWN_ARROW(-1204, "down-arrow.png"),
+	NEW_TAB(-1205, "new-tab.png");
 
 	@Getter
 	private final int spriteId;

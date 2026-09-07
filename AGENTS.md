@@ -1,163 +1,90 @@
-# RuneLite Plugin Development — Agent Guidelines
+# AGENTS.md
 
-## Logging
+Guidance for agents and contributors working on Bank Tags Extended.
 
-- Use `log.debug()` for developer/diagnostic logging.
-- Do not use `log.info` for per-frame or per-event logging - RuneLite runs at INFO level in production, so high-frequency info logs will pollute user logs. `log.info()` is fine for one-time startup/shutdown messages or infrequent events.
+## Project purpose
 
-## Threading & Concurrency
+This repository is a standalone RuneLite plugin fork of the built-in Bank Tags plugin. It currently keeps tag data in RuneLite configuration under `emyrk-bank-tags`. The next major feature is optional synchronization of bank tags, tag tabs, icons, and layouts through a central server so members of one Group Ironman group can share the same organization.
 
-- Never use `Thread.sleep()`.
-- Never block on `shutDown()` or `startUp()` — don't call `executor.awaitTermination()` in shutdown, just use `shutdownNow()`.
-- Never do blocking network IO or disk IO on the client thread. The OkHttp thread pool can be used for blocking network requests.
-  If you need to call back into `client` from the okhttp threadpool, such as from the response queued with `enqueue()`, use `clientThread.invoke()`
-- Explicitly cancel scheduled tasks (e.g. `ScheduledFuture`) on shutdown, in addition to shutting down the executor.
-- For batching async work, use `CompletableFuture.allOf()` — not `CountDownLatch`.
-- If you must use `Process.waitFor()`, always pass a reasonable timeout.
+Read these before changing behavior:
 
-## Performance
+- `README.md`
+- `docs/architecture.md`
+- `docs/sync-design.md` for the planned synchronization boundary and unresolved decisions
+- `docs/remote-sync-plan.md` for the proposed per-tag implementation sequence
 
-- Don't scan the entire scene every tick or frame. Use events such as object and npc (de)spawn to track what you care about and maintain your own collection.
-- Keep the computations in Overlays, which are run each frame, to a minimum.
+## Repository map
 
-## API Usage
+- `src/main/java/com/emyrk/banktags/BankTagsPlugin.java`: plugin lifecycle, built-in config migration, bank search integration, and item tag editing.
+- `src/main/java/com/emyrk/banktags/TagManager.java`: item-to-tag persistence and tag rename/remove operations.
+- `src/main/java/com/emyrk/banktags/tabs/TabManager.java`: ordered tabs and tab icon persistence.
+- `src/main/java/com/emyrk/banktags/tabs/TabInterface.java`: bank UI, imports/exports, tab operations, and most user mutation entry points.
+- `src/main/java/com/emyrk/banktags/tabs/LayoutManager.java`: layout persistence and bank widget layout behavior.
+- `src/main/java/com/emyrk/banktags/tabs/Layout.java`: in-memory ordered item layout, with `-1` representing an empty slot.
+- `src/test/java/com/emyrk/banktags/`: unit tests and the development client launcher.
 
-- Use `net.runelite.api.gameval` package constants — `ItemID`, `InterfaceID`, `ObjectID`, etc. Never hardcode magic numbers when gameval constants can be used instead.
-- Use `LinkBrowser` to open URLs, not `java.awt.Desktop`
-- When looking up Widgets, pass the component ID from gamevals (eg `client.getWidget(InterfaceID.DomEndLevelUi.LOOT_VALUE)`) - do not manually combine interface + component child IDs.
-- Use of Java reflection is forbidden.
+## Build and validation
 
-## HTTP & JSON
+Use Java 11 compatible code.
 
-- Use OkHttp for all HTTP requests. `@Inject OkHttpClient` to get the HTTP client. Do not use `HttpURLConnection`, `java.net.http.HttpClient`, or Apache HttpClient.
-- Use `@Inject Gson` to get a Gson instead, never create your own from scratch. You can use `.newBuilder()` to create one derived from the base `Gson.`
-- Do not add transitive dependencies from `runelite-client` directly to `build.gradle`, such as gson, guice, or okhttp.
-- Never execute okhttp calls on the client thread. Prefer using `enqueue()` which places the request on the okhttp threadpool.
+```sh
+./gradlew test
+./gradlew run
+```
 
-## File I/O
+Run `./gradlew test` after every code change. Add focused tests for serialization, merge/conflict behavior, remote update handling, and feedback-loop prevention when sync code is introduced.
 
-- Only read/write files inside the `.runelite` directory. Create a subdirectory for your plugin (e.g. `.runelite/your-plugin-name/`) if you need to store data on disk.
-- Use `RuneLite.RUNELITE_DIR` to get the path.
-- Alternatively, use `JFileChooser` for user-initiated file operations.
+A successful build does not verify in-game behavior. Do not automate RuneScape input. Offer to run `./gradlew run`, then ask the user to test the changed behavior in the development client.
 
-## Config
+## Persistence contract
 
-- Config group names must be specific — e.g. `"deadman-prices"`, not `"deadman"`.
-- Never rename a config key or config group without providing a migration. Renaming silently resets users' saved settings.
-- If you add a `@ConfigItem` that toggles a feature involving a third-party server, it must:
-  - Be **disabled by default** (opt-in)
-  - Have a `warning` field set to: `"This feature submits your IP address to a 3rd-party server not controlled or verified by RuneLite developers"`
+The current local source of truth is RuneLite `ConfigManager` in group `emyrk-bank-tags`:
 
-## Plugin Setup & Packaging
+- `item_<id>`: CSV tag names for an item. Negative IDs represent variation tags.
+- `tagtabs`: CSV ordered tab names.
+- `icon_<tag>`: item ID used as the tab icon.
+- `layout_<tag>`: CSV item IDs by slot, with `-1` for empty slots.
+- `hidden_<tag>`: hidden tag marker.
+- `migratedFromBuiltin`: one-time import marker for the built-in `banktags` group.
+- `useTabs`, `rememberTab`, `removeTabSeparators`, `preventTagTabDrags`, `position`, and `tab`: plugin and local UI preferences.
 
-- Rename everything from the template. Do not leave `com.example`, `ExamplePlugin`, `ExampleConfig`, or `example` as the config group. Rename the package path, class names, config group, `build.gradle` group, `settings.gradle` project name, and `runelite-plugin.properties`.
-- Do not include a `META-INF/services/net.runelite.client.plugins.Plugin` file.
-- Do not commit build artifacts — no `.class` files, `out/` directories, or `.tmp` directories.
-- `build.gradle` must target Java 11** and match the structure of the example-plugin template.
-- Retain a permissive license, such as BSD-2.
+Do not rename the config group or keys without a migration. Preserve tag standardization through RuneLite `Text.standardize`, `Text.fromCSV`, and `Text.toCSV` where the existing code does so.
 
-## Resources & Assets
+## Sync implementation rules
 
-- Optimize icon PNGs. Java loads images at full resolution in memory (`width × height × 4` bytes), so a seemingly small file can use significant memory.
-- Ensure PNGs are actually PNGs — do not rename JPEGs or ICOs to `.png`.
+- Keep networking outside `TabInterface`, `TagManager`, `TabManager`, and `LayoutManager`. Introduce a small sync boundary so UI and persistence code do not depend directly on HTTP payloads.
+- Route synced writes through the same domain mutation path as local writes. Do not scatter direct `ConfigManager` writes across a network callback.
+- Preserve a local synchronized cache so tags remain usable while offline or when the server is unavailable.
+- Remote sync must use `emyrk-bank-tags-sync` for synchronized data and `emyrk-bank-tags-sync-settings` for connection preferences. Never write remote values into the built-in `banktags` group or the existing `emyrk-bank-tags` local data.
+- Once enabled, game-side synchronization is automatic per tag. Debounce compound mutations and upload only their completed state. Do not require routine manual save or retrieve actions.
+- Never perform blocking network or disk I/O on the RuneLite client thread. Use injected `OkHttpClient` with asynchronous requests. Use `clientThread.invoke()` before touching RuneLite client state or bank widgets from a callback.
+- Use injected `Gson`. Do not instantiate a separate JSON stack or add transitive RuneLite dependencies directly to `build.gradle`.
+- Synchronization must be opt-in and disabled by default. Any config item enabling the third-party server must include this exact warning:
+  `This feature submits your IP address to a 3rd-party server not controlled or verified by RuneLite developers`
+- Do not send bank contents, player location, equipment, credentials, session tokens from RuneLite, or data about unrelated players. The intended payload is shared tag metadata only.
+- Do not log secrets, authorization values, complete payloads, or personal identifiers. Use `log.debug()` for diagnostics.
+- Design remote application and local observation so a remote update cannot be uploaded again as a new local update. Tests must cover this feedback-loop case.
+- Do not silently overwrite divergent local and remote data. The conflict policy, group identity, authentication model, and deletion semantics must be explicitly chosen and documented before implementation.
+- Treat protocol payloads as versioned. Reject or safely ignore unsupported schema versions.
+- Keep local-only UI preferences out of the shared document unless the design explicitly changes this. The expected shared candidates are item tags, ordered tabs, icons, and layouts. See `docs/sync-design.md`.
 
-## Cleanup
+## RuneLite constraints
 
-- Remove unused config classes, fields, and imports.
-- Clean up subscriptions, listeners, and overlays in `shutDown()`.
-- Do not mix code reformatting with feature changes in the same commit — it makes diffs unreadable for reviewers.
+- Use RuneLite gameval constants instead of magic widget, item, object, or interface IDs.
+- Do not use reflection, native access, external processes, dynamic code loading, Java serialization, or input injection.
+- Use `LinkBrowser` for URLs.
+- Keep event and frame handlers lightweight.
+- Register listeners and sprite overrides in `startUp()`. Remove them in `shutDown()`.
+- Do not block startup or shutdown. Explicitly cancel future scheduled tasks and use `shutdownNow()` for owned executors.
+- Preserve the upstream copyright headers.
+- Do not mix broad formatting changes with feature work.
+- Do not commit build output, credentials, endpoint secrets, or local account data.
 
-## Testing
+## Change discipline
 
-You cannot verify plugin behavior yourself. Even if you have screen-capture or computer-use tools available, **do not use them to interact with RuneScape** — automating game input violates Jagex's third-party client guidelines and will get the user's account banned. Only the user can confirm a plugin works in-game.
-
-After completing a task, do not declare it done. Instead:
-
-1. Offer to launch RuneLite for the user by running `./gradlew run` from the plugin's root directory.
-2. Instruct the user to follow the "Using Jagex Accounts" instructions found at https://github.com/runelite/runelite/wiki/Using-Jagex-Accounts to login to the development client.
-3. Tell the user *what to test* — the specific behavior you changed, the golden path, and any edge cases worth exercising.
-4. Wait for the user to confirm the feature works in-game before considering the task complete. A clean JVM start is not a passing test.
-
----
-
-# Plugin Rules & Restrictions
-
-Features that are **forbidden or restricted** in RuneLite hub plugins.
-Sourced from [Jagex's Third-Party Client Guidelines](https://secure.runescape.com/m=news/third-party-client-guidelines?oldschool=1) and RuneLite's [Rejected or Rolled-Back Features](https://github.com/runelite/runelite/wiki/Rejected-or-Rolled-Back-Features).
-
-**If your plugin does any of the things listed below, it will be rejected.**
-
-## Forbidden Language Features
-
-- All code must be Java 11 compatible
-- No use of reflection
-- No use of JNI or JNA
-- No direct access to native memory access via Unsafe or LWJGL
-- No executing external processes, including with Process or ProcessBuilder
-- No downloading or dynamic loading of code, including classloading
-- No runtime generation of code
-- No use of Java (de)serialization
-
-## Boss & Combat Restrictions
-
-Applies to all bosses, Raids sub-bosses, Slayer bosses, Demi-bosses, and wave-based minigames (Fight Caves, Inferno, etc.):
-
-- No next-attack prediction (timing or attack style)
-- No projectile target/landing indicators
-- No prayer switching indicators
-- No attack counters
-- No automatic indicators showing where to stand or not stand (manual tile marking is allowed)
-- No additional visual or audio indicators of a boss mechanic, unless it is a manually triggered external helper
-- No advance warning of future hazards (highlighting currently active hazards is OK)
-- No "flinch" timing helpers
-- No combat prayer recommendations
-- No NPC focus identification (which player the NPC is targeting)
-- No content simulation (e.g. boss fight simulators)
-
-New high-end PvM boss plugins are not accepted as a blanket policy.
-
-## PvP Restrictions
-
-- No removing or deprioritising attack/cast options in PvP
-- No opponent freeze duration indicators
-- No PvP clan opponent identification
-- No PvP loot drop previews
-- No identifying an opponent's opponent
-- No PvP target scouting information
-- No player group summaries (attackable counts, prayer usage, etc.)
-- No level-based PvP player indicators (highlighting attackable players or those within level range)
-- No spell targeting simplification (removing menu options to make targeting easier)
-
-## Menu Restrictions
-
-- No adding new menu entries that cause actions to be sent to the server
-- No menu modifications for Construction
-- No menu modifications for Blackjacking
-- No conditional menu entry removal based on NPC type, friend status, etc. (can be overpowered)
-
-## Interface Restrictions
-
-- No unhiding hidden interface components (special attack bar, minimap)
-- No moving or resizing click zones for 3D components
-- No moving or resizing click zones for combat options, inventory, equipment, or spellbook
-- No resizing prayer book click zones
-- No resizing spellbook components
-- No removing inventory pane background or making it click-through
-- No detached camera world interaction (interacting with the game world from a camera position that isn't the player's)
-
-## Input Restrictions
-
-- No injecting input events, including mouse and keyboard events
-- No autotyping — plugins must not programmatically insert text into the chatbox input (includes pasting, shorthand expansion)
-- No modifying outgoing chat messages after the user sends them
-
-## Data & Privacy Restrictions
-
-- No exposing player information over HTTP
-- No crowdsourcing data about other players (locations, gear, names, etc.)
-- No credential manager plugins that stores account credentials
-
-## Content Restrictions
-
-- No adult or overtly sexual content
-- No plugins that use player-provided IDs for their entire functionality (causes moderation issues)
+1. Read the relevant manager and all of its callers before changing persistence.
+2. Update `docs/architecture.md` when ownership or data flow changes.
+3. Update `docs/sync-design.md` when a protocol or conflict decision is made.
+4. Add or update tests before claiming the code is ready.
+5. Run `./gradlew test` and report the exact result.
+6. Ask the user to verify the behavior in-game through the development client.

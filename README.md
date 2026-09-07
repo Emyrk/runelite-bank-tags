@@ -12,6 +12,14 @@ The initial implementation tracks RuneLite's built-in Bank Tags plugin and uses 
 
 This project requires Java 11 or newer to run Gradle and compiles plugin code for Java 11.
 
+If Nix is installed, enter the development shell first:
+
+```sh
+nix-shell
+```
+
+The shell provides Java 11 and sets `JAVA_HOME`. Then use the Gradle wrapper:
+
 ```sh
 ./gradlew test
 ./gradlew run
@@ -28,3 +36,9 @@ runelite-client/src/main/java/net/runelite/client/plugins/banktags
 ```
 
 Original copyright notices are retained in the source files. This repository is distributed under the BSD 2-Clause License. See [LICENSE](LICENSE).
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Shared bank tag sync design notes](docs/sync-design.md)
+- [Per-tag remote sync implementation plan](docs/remote-sync-plan.md)
