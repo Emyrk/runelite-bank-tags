@@ -113,6 +113,10 @@ The wire protocol is frozen in `docs/remote-sync-protocol.md`. Sync metadata liv
 
 `BankTagSnapshotService` reads and applies one complete tag. `SharedBankTag` is the canonical local model for name, icon, exact and variation item IDs, optional layout, remote identity, revision, and deletion state. Its SHA-256 content hash is deterministic and excludes transport metadata such as tag ID and revision.
 
+### Sync client
+
+Milestone 3a adds the HTTP layer under `com.emyrk.banktags.sync` without any coordinator, UI, or lifecycle wiring. `BankTagSyncClient` issues the v1 protocol requests through the injected `OkHttpClient` (with a 15 second call timeout) and reads `BankTagsSyncConfig` on every call, so URL, group, and token changes apply without a restart. `BankTagSyncJson` encodes request bodies and decodes tag, manifest, and error documents by walking JSON trees, so unknown fields are ignored and every required field is checked. `BankTagManifest`, `SyncFailure`, and `ManifestResult` are the immutable results; `SyncFailure` maps HTTP status codes to a `Kind` and carries the `current` tag or manifest from a `409`. Every request is asynchronous and its callbacks run on OkHttp threads: they must never touch RuneLite client state or bank widgets directly, and the future coordinator owns retries, backoff, and the hop back to the client thread. The client never logs URLs, headers, bodies, or the token.
+
 ## Mutation flow
 
 Most writes ultimately call one of these methods:
