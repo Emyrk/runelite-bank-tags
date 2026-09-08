@@ -35,6 +35,7 @@ import java.util.Set;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.inject.Inject;
+import javax.inject.Provider;
 import javax.inject.Singleton;
 import lombok.NonNull;
 import lombok.Value;
@@ -63,6 +64,7 @@ import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.ItemQuantityMode;
 import net.runelite.api.widgets.JavaScriptCallback;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.eventbus.EventBus;
@@ -83,6 +85,7 @@ import static com.emyrk.banktags.BankTagsPlugin.BANK_ITEM_Y_PADDING;
 import com.emyrk.banktags.BankTagsStorage;
 import static com.emyrk.banktags.BankTagsPlugin.TAG_LAYOUT_PREFIX;
 import com.emyrk.banktags.BankTagsService;
+import com.emyrk.banktags.sync.BankTagSyncCoordinator;
 import static com.emyrk.banktags.tabs.TabInterface.DUPLICATE_ITEM;
 import static com.emyrk.banktags.tabs.TabInterface.REMOVE_LAYOUT;
 import net.runelite.client.util.Text;
@@ -100,13 +103,17 @@ public class LayoutManager
 	private final PotionStorage potionStorage;
 	private final EventBus eventBus;
 	private final BankTagsStorage storage;
+	private final ClientThread clientThread;
+	// Provider: LayoutManager -> coordinator -> snapshot service -> LayoutManager would otherwise be a constructor cycle.
+	private final Provider<BankTagSyncCoordinator> syncCoordinator;
 
 	private final List<PluginAutoLayout> autoLayouts = new ArrayList<>();
 
 	@Inject
 	LayoutManager(Client client, ItemManager itemManager, BankTagsPlugin plugin, ChatboxPanelManager chatboxPanelManager,
 		BankSearch bankSearch, ChatMessageManager chatMessageManager,
-		PotionStorage potionStorage, EventBus eventBus, BankTagsStorage storage)
+		PotionStorage potionStorage, EventBus eventBus, BankTagsStorage storage,
+		ClientThread clientThread, Provider<BankTagSyncCoordinator> syncCoordinator)
 	{
 		this.client = client;
 		this.itemManager = itemManager;
@@ -117,6 +124,8 @@ public class LayoutManager
 		this.potionStorage = potionStorage;
 		this.eventBus = eventBus;
 		this.storage = storage;
+		this.clientThread = clientThread;
+		this.syncCoordinator = syncCoordinator;
 
 		registerAutoLayout(plugin, "Default", new DefaultLayout());
 	}
@@ -347,6 +356,7 @@ public class LayoutManager
 		if (modified)
 		{
 			saveLayout(l);
+			syncCoordinator.get().onTagMutated(l.getTag());
 		}
 	}
 
@@ -539,6 +549,7 @@ public class LayoutManager
 		}
 
 		saveLayout(l);
+		syncCoordinator.get().onTagMutated(l.getTag());
 		bankSearch.layoutBank();
 	}
 
@@ -712,7 +723,11 @@ public class LayoutManager
 
 						chatboxPanelManager.openTextMenuInput("Tab laid out using the '" + autoLayout.getName() + "' layout.")
 							.option("1. Keep", () ->
-								saveLayout(new_))
+								clientThread.invoke(() ->
+								{
+									saveLayout(new_);
+									syncCoordinator.get().onTagMutated(tag);
+								}))
 							.option("2. Undo", () ->
 								plugin.openTag(tag, old))
 							.onClose(bankSearch::layoutBank)

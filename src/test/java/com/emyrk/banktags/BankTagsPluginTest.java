@@ -35,8 +35,11 @@ import net.runelite.api.gameval.ItemID;
 import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.config.RuneLiteConfig;
+import net.runelite.client.callback.ClientThread;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.game.ItemManager;
 import static com.emyrk.banktags.BankTagsPlugin.ITEM_KEY_PREFIX;
+import com.emyrk.banktags.sync.BankTagSyncCoordinator;
 import com.emyrk.banktags.tabs.TabInterface;
 import net.runelite.client.plugins.cluescrolls.ClueScrollService;
 import static org.junit.Assert.assertEquals;
@@ -45,6 +48,10 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.Mock;
+import org.mockito.InOrder;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import org.mockito.junit.MockitoJUnitRunner;
 
@@ -86,6 +93,14 @@ public class BankTagsPluginTest
 	@Mock
 	@Bind
 	private ChatMessageManager chatMessageManager;
+
+	@Mock
+	@Bind
+	private ClientThread clientThread;
+
+	@Mock
+	@Bind
+	private BankTagSyncCoordinator syncCoordinator;
 
 	@Bind
 	@Named("developerMode")
@@ -162,5 +177,33 @@ public class BankTagsPluginTest
 
 		bankTagsPlugin.onScriptCallbackEvent(EVENT);
 		assertEquals(1, client.getIntStack()[0]);
+	}
+
+	@Test
+	public void configChangeToggleRestartsCoordinator()
+	{
+		ConfigChanged event = new ConfigChanged();
+		event.setGroup(BankTagsStorage.SYNC_SETTINGS_GROUP);
+		event.setKey("enabled");
+		event.setNewValue("true");
+
+		bankTagsPlugin.onConfigChanged(event);
+
+		InOrder order = inOrder(syncCoordinator);
+		order.verify(syncCoordinator).stop();
+		order.verify(syncCoordinator).start();
+		verify(clientThread).invokeLater(org.mockito.ArgumentMatchers.any(Runnable.class));
+	}
+
+	@Test
+	public void unrelatedConfigChangeLeavesCoordinatorAlone()
+	{
+		ConfigChanged event = new ConfigChanged();
+		event.setGroup(BankTagsPlugin.CONFIG_GROUP);
+		event.setKey("rememberTab");
+
+		bankTagsPlugin.onConfigChanged(event);
+
+		verifyNoInteractions(syncCoordinator);
 	}
 }

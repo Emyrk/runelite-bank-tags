@@ -1,18 +1,13 @@
 package com.emyrk.banktags;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import net.runelite.client.config.ConfigManager;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import org.junit.Before;
 import org.junit.Test;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -26,45 +21,8 @@ public class BankTagsStorageTest
 	@Before
 	public void before()
 	{
-		configManager = mock(ConfigManager.class);
+		configManager = FakeConfigManager.create(values);
 		syncConfig = mock(BankTagsSyncConfig.class);
-		when(configManager.getConfiguration(anyString(), anyString())).thenAnswer(invocation ->
-			values.get(key(invocation.getArgument(0), invocation.getArgument(1))));
-		when(configManager.getConfiguration(anyString(), anyString(), org.mockito.ArgumentMatchers.<java.lang.reflect.Type>any())).thenAnswer(invocation ->
-		{
-			String value = values.get(key(invocation.getArgument(0), invocation.getArgument(1)));
-			Class<?> type = invocation.getArgument(2);
-			if (value == null)
-			{
-				return null;
-			}
-			if (type == Boolean.class)
-			{
-				return Boolean.valueOf(value);
-			}
-			return value;
-		});
-		when(configManager.getConfigurationKeys(anyString())).thenAnswer(invocation ->
-		{
-			String prefix = invocation.getArgument(0);
-			return values.keySet().stream().filter(k -> k.startsWith(prefix)).sorted().collect(Collectors.toList());
-		});
-		doAnswer(invocation ->
-		{
-			values.put(key(invocation.getArgument(0), invocation.getArgument(1)), invocation.getArgument(2));
-			return null;
-		}).when(configManager).setConfiguration(anyString(), anyString(), anyString());
-		doAnswer(invocation ->
-		{
-			Object value = invocation.getArgument(2);
-			values.put(key(invocation.getArgument(0), invocation.getArgument(1)), String.valueOf(value));
-			return null;
-		}).when(configManager).setConfiguration(anyString(), anyString(), org.mockito.ArgumentMatchers.<Object>any());
-		doAnswer(invocation ->
-		{
-			values.remove(key(invocation.getArgument(0), invocation.getArgument(1)));
-			return null;
-		}).when(configManager).unsetConfiguration(anyString(), anyString());
 		storage = new BankTagsStorage(configManager, syncConfig);
 	}
 
@@ -102,6 +60,6 @@ public class BankTagsStorageTest
 
 	private static String key(String group, String name)
 	{
-		return group + "." + name;
+		return FakeConfigManager.key(group, name);
 	}
 }

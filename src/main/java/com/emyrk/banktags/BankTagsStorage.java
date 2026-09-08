@@ -38,6 +38,16 @@ public class BankTagsStorage
 				configManager.setConfiguration(SYNC_DATA_GROUP, keyParts[1], value);
 			}
 		}
+		markSyncStorageInitialized();
+	}
+
+	/**
+	 * Sets the marker that makes {@link #SYNC_DATA_GROUP} the active repository while sync is enabled.
+	 * The coordinator calls this before applying remote tags on first enable so the applied data lands
+	 * in the synchronized namespace.
+	 */
+	public void markSyncStorageInitialized()
+	{
 		configManager.setConfiguration(SYNC_DATA_GROUP, SYNC_STORAGE_INITIALIZED_KEY, "true");
 	}
 

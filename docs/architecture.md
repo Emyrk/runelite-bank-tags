@@ -17,8 +17,11 @@ On startup it:
 3. Registers custom tab sprites.
 4. Registers `TabInterface`, `LayoutManager`, and `PotionStorage` event subscribers.
 5. Reinitializes the bank interface on the client thread.
+6. Calls `BankTagSyncCoordinator.start()`, which is a no-op unless sync is enabled and configured.
 
-On shutdown it unregisters those components, removes custom widgets and sprite overrides, then reinitializes the normal bank interface.
+On shutdown it stops the coordinator first (cancelling polling, debounces, and in-flight requests), then unregisters those components, removes custom widgets and sprite overrides, and reinitializes the normal bank interface.
+
+A `ConfigChanged` event for `emyrk-bank-tags-sync-settings` stops and restarts the coordinator. When the `enabled` flag flips, the plugin also reloads `TabManager` and reinitializes the bank because `BankTagsStorage.getActiveGroup()` switches repositories immediately.
 
 The built-in Bank Tags plugin must be disabled while this plugin is active because both modify the same bank interface.
 
@@ -113,6 +116,23 @@ The wire protocol is frozen in `docs/remote-sync-protocol.md`. Sync metadata liv
 
 `BankTagSnapshotService` reads and applies one complete tag. `SharedBankTag` is the canonical local model for name, icon, exact and variation item IDs, optional layout, remote identity, revision, and deletion state. Its SHA-256 content hash is deterministic and excludes transport metadata such as tag ID and revision.
 
+### Sync coordinator and metadata
+
+Milestone 3b adds `BankTagSyncMetadata` and `BankTagSyncCoordinator`.
+
+`BankTagSyncMetadata` reads and writes only the reserved `sync`-prefixed keys of `emyrk-bank-tags-sync`, directly through `ConfigManager`, regardless of which repository is active. It never touches `banktags` or `emyrk-bank-tags`.
+
+`BankTagSyncCoordinator` owns the automatic behaviour:
+
+- **First enable** (no `syncStorageInitialized` marker): fetches the manifest. `401` stops with a chat message. A group with tags is fetched in full and applied into the sync namespace with `applyingRemote` set, then the marker is written and the bank reinitialized; local tags are untouched. An empty group copies the local tags into the sync namespace, mints a tag ID (`revision 0`) per tab, and schedules a create for each.
+- **Polling** on RuneLite's shared `ScheduledExecutorService` with `If-None-Match`; only one poll is in flight. The manifest decision table from the protocol document produces fetches, local deletes, and conflict records; every needed tag is fetched first, and local state is only touched once all fetches succeeded. After applying, `TabInterface.refreshTabs()` rebuilds the UI, dirty tags are re-scheduled, and pending deletes are retried.
+- **Uploads** are debounced per tag and send the snapshot taken on the client thread; the stored `baseHash` is the hash of what was sent. `409` and `404` responses become `syncConflict_` records (conflicts are recorded, not surfaced, until Milestone 3c). Network and server errors leave the tag dirty for the next poll sweep; other rejections are logged at debug and dropped until the tag changes again.
+- **Deletes** are recorded as `syncPendingDelete_` and sent with `If-Match`; `409`/`404` clear the pending record and let the next poll re-create the tab if it still exists remotely.
+- **Order** uploads are debounced; a `409` reconciles the local order with the server's manifest and retries exactly once. A successful order response is a full manifest and is processed like a poll result.
+- **Threading**: callbacks hop to the client thread through `ClientThread.invoke`; a generation counter makes replies from before `stop()` inert; nothing blocks.
+
+Guice wiring note: `TabInterface` and `LayoutManager` depend on the coordinator, and the coordinator depends on `TabInterface` and (through `BankTagSnapshotService`) on `LayoutManager`. The cycle is broken with `Provider<TabInterface>` in the coordinator and `Provider<BankTagSyncCoordinator>` in `LayoutManager`.
+
 ### Sync client
 
 Milestone 3a adds the HTTP layer under `com.emyrk.banktags.sync` without any coordinator, UI, or lifecycle wiring. `BankTagSyncClient` issues the v1 protocol requests through the injected `OkHttpClient` (with a 15 second call timeout) and reads `BankTagsSyncConfig` on every call, so URL, group, and token changes apply without a restart. `BankTagSyncJson` encodes request bodies and decodes tag, manifest, and error documents by walking JSON trees, so unknown fields are ignored and every required field is checked. `BankTagManifest`, `SyncFailure`, and `ManifestResult` are the immutable results; `SyncFailure` maps HTTP status codes to a `Kind` and carries the `current` tag or manifest from a `409`. Every request is asynchronous and its callbacks run on OkHttp threads: they must never touch RuneLite client state or bank widgets directly, and the future coordinator owns retries, backoff, and the hop back to the client thread. The client never logs URLs, headers, bodies, or the token.
@@ -127,9 +147,27 @@ Most writes ultimately call one of these methods:
 - `LayoutManager.saveLayout(...)`
 - `LayoutManager.removeLayout(...)`
 
-Today these methods write directly to `ConfigManager`. `TabInterface` can perform one user operation that causes several writes. Rename is the clearest example: it removes an old icon and layout, changes tab order, writes a new icon and layout, then rewrites item tags.
+Today these methods write directly to `ConfigManager` (through `BankTagsStorage`). `TabInterface` can perform one user operation that causes several writes. Rename is the clearest example: it removes an old icon and layout, changes tab order, writes a new icon and layout, then rewrites item tags.
 
-This means configuration-change events alone are a poor transaction boundary for synchronization. A future sync layer should capture a coherent shared document or explicit domain operation after the full local mutation completes.
+Configuration-change events are therefore a poor transaction boundary for synchronization. Instead, every user mutation entry point notifies `BankTagSyncCoordinator` **after** its persistence call completes, inside the same client-thread block. The coordinator then debounces and uploads the completed per-tag snapshot. The hooks are:
+
+| Entry point | Notification |
+| --- | --- |
+| `TabInterface.handleNewTab` (new tab, import tab) | `onTagMutated(tag)` then `onTabOrderChanged()` |
+| `TabInterface.opTagTab` change icon | `onTagMutated(tag)` |
+| `TabInterface.opTagTab` enable/disable layout | `onTagMutated(tag)` |
+| `TabInterface.deleteTab` (both delete options, rename-merge) | `onTagDeleted(tag)` then `onTabOrderChanged()` |
+| `TabInterface.renameTab` | `onTagRenamed(old, new)`; merge branch `onTagMutated(new)` |
+| `TabInterface.moveTagTab` | `onTabOrderChanged()` |
+| `TabInterface.onWidgetDrag` item dropped on a tab | `onTagMutated(tab)` |
+| `TabInterface` `Remove-tag` menu click | `onTagMutated(activeTag)` |
+| `TabInterface.opDuplicateItem`, `opRemoveLayout` | `onTagMutated(activeLayout tag)` |
+| `TabInterface.handleDeposit` (fast path and chatbox path) | `onTagMutated(tag)` per tag involved |
+| `LayoutManager.dragCompleteHandler`, layout auto-append while drawing | `onTagMutated(layout tag)` |
+| `LayoutManager` auto-layout "Keep" (moved onto the client thread) | `onTagMutated(tag)` |
+| `BankTagsPlugin.editTags` | `onTagMutated(tag)` for the union of old and new exact/variation tags |
+
+Only names that have a tab are synchronized; item tags without a tab stay local. Every notification is ignored while the coordinator is applying a remote update (`isApplyingRemote()`), which prevents a remote change from being uploaded again.
 
 ## Existing tests
 

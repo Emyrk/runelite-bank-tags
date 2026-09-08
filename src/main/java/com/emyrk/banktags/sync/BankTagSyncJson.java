@@ -161,6 +161,19 @@ public class BankTagSyncJson
 		return gson.toJson(object);
 	}
 
+	/**
+	 * Encodes a complete tag document including {@code tagId}, {@code revision} and {@code deleted}.
+	 * Used for local persistence of conflict records; {@link #parseTag(String)} reads it back.
+	 */
+	public String tagDocument(SharedBankTag tag)
+	{
+		JsonObject object = gson.fromJson(tagRequestBody(tag), JsonObject.class);
+		object.addProperty("tagId", tag.getTagId());
+		object.addProperty("revision", tag.getRevision());
+		object.addProperty("deleted", tag.isDeleted());
+		return gson.toJson(object);
+	}
+
 	public String orderRequestBody(List<String> orderedTagIds)
 	{
 		JsonObject object = new JsonObject();
