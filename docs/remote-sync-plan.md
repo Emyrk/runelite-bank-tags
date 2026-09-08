@@ -62,114 +62,19 @@ The existing `bank-tags-sync` script is a useful prototype. It proves that a tab
 
 ## Canonical per-tag model
 
-Use a stable server ID so rename does not become delete-plus-create.
-
-```json
-{
-  "schemaVersion": 1,
-  "tagId": "5e4a8e36-e5f4-4daa-ae7a-e510f3e66721",
-  "name": "herblore",
-  "iconItemId": 952,
-  "itemIds": [199, 201, -203],
-  "layout": [199, 201, -1, 203],
-  "revision": 7,
-  "deleted": false,
-  "updatedAt": "2026-09-07T20:00:00Z"
-}
-```
-
-Rules:
-
-- `schemaVersion` must equal a supported version.
-- `tagId` is server-generated and stable across rename.
-- `name` is normalized with the same semantics as RuneLite `Text.standardize`.
-- Names are unique among non-deleted tags within a group.
-- `itemIds` is a sorted, duplicate-free set.
-- Negative `itemIds` preserve RuneLite variation-tag semantics.
-- `layout` preserves slot order. `-1` means an empty slot.
-- Every non-empty layout item must also be in the effective tag item set.
-- Item IDs, layout length, name length, and total payload size have server-enforced limits.
-- `revision` is server-issued and increases for each change to that tag.
-- `updatedAt` is informational. It is not used to resolve conflicts.
+Superseded: the tag document is frozen in `docs/remote-sync-protocol.md` ("Tag document").
 
 ## Group manifest model
 
-The manifest makes change discovery cheap while tag bodies remain independent.
-
-```json
-{
-  "schemaVersion": 1,
-  "groupRevision": 42,
-  "orderedTagIds": [
-    "5e4a8e36-e5f4-4daa-ae7a-e510f3e66721"
-  ],
-  "tags": [
-    {
-      "tagId": "5e4a8e36-e5f4-4daa-ae7a-e510f3e66721",
-      "name": "herblore",
-      "revision": 7,
-      "deleted": false
-    }
-  ]
-}
-```
-
-The manifest is group-wide metadata. Tag content still saves and retrieves one tag at a time. Reordering updates the manifest, not every tag document.
+Superseded: the manifest is frozen in `docs/remote-sync-protocol.md` ("Manifest").
 
 ## API plan for groupiron.men
 
-All endpoints live under the existing authenticated group scope and use the current `Authorization` group token.
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/group/{group_name}/bank-tags` | Get manifest, optionally only when newer than a supplied group revision |
-| `POST` | `/api/group/{group_name}/bank-tags` | Create one tag |
-| `GET` | `/api/group/{group_name}/bank-tags/{tag_id}` | Retrieve one tag |
-| `PUT` | `/api/group/{group_name}/bank-tags/{tag_id}` | Update one tag with an expected revision |
-| `DELETE` | `/api/group/{group_name}/bank-tags/{tag_id}` | Tombstone one tag with an expected revision |
-| `PUT` | `/api/group/{group_name}/bank-tags/order` | Replace ordered tag IDs with an expected group revision |
-
-Response behavior:
-
-- `200`: retrieve or update succeeded.
-- `201`: create succeeded.
-- `204` or `304`: manifest has not changed since the supplied revision.
-- `400`: invalid schema or payload.
-- `401`: invalid group name or token.
-- `404`: unknown tag.
-- `409`: tag or group revision conflict. Return current metadata, not secrets.
-- `413`: payload exceeds limits.
-
-Use request bodies with `expectedRevision` or HTTP conditional headers consistently. Do not mix two concurrency mechanisms.
+Superseded: routes, conditional headers, and error bodies are frozen in `docs/remote-sync-protocol.md` ("Concurrency: HTTP conditional headers only" and "Error body").
 
 ## Server storage plan
 
-Add migrations in the existing GroupIron server migration system.
-
-### `bank_tags`
-
-- `group_id BIGINT NOT NULL`
-- `tag_id UUID PRIMARY KEY`
-- `name CITEXT NOT NULL`
-- `icon_item_id INTEGER NOT NULL`
-- `item_ids JSONB NOT NULL`
-- `layout JSONB NULL`
-- `revision BIGINT NOT NULL`
-- `deleted_at TIMESTAMPTZ NULL`
-- `updated_at TIMESTAMPTZ NOT NULL`
-
-Add a partial unique index on `(group_id, name)` for non-deleted rows.
-
-### `bank_tag_groups`
-
-- `group_id BIGINT PRIMARY KEY`
-- `group_revision BIGINT NOT NULL`
-- `ordered_tag_ids JSONB NOT NULL`
-- `updated_at TIMESTAMPTZ NOT NULL`
-
-Every tag create, update, rename, or delete and every order update increments `group_revision` in the same database transaction as the changed data.
-
-Retain tombstones for a defined period, recommended 90 days. The manifest must continue reporting retained tombstones. A later cleanup migration or job may purge older tombstones.
+Superseded: the tables and transaction rules are frozen in `docs/remote-sync-protocol.md` ("Server storage").
 
 ## RuneLite plugin design
 
@@ -232,19 +137,7 @@ Because `ConfigManager` has no transaction, suppress observation and UI refresh 
 
 ### Local sync metadata
 
-Store non-shared metadata in `emyrk-bank-tags-sync` alongside the synchronized cache, using reserved keys that cannot collide with tag names:
-
-- `syncGroupRevision`: latest observed group revision.
-- `syncTag_<tagId>`: JSON containing local standardized name, remote revision, and last-synchronized content hash.
-
-A content hash is calculated from normalized name, icon, sorted items, and exact layout. It excludes remote timestamps and revisions.
-
-Dirty detection:
-
-- Current local hash equals baseline hash: local tag is clean and remote can auto-apply.
-- Current local hash differs from baseline: local tag is dirty.
-- Remote revision equals stored revision: there is nothing to apply.
-- Remote revision changed and local is dirty: conflict.
+Superseded: the `sync*` keys, dirty test, and decision tables are frozen in `docs/remote-sync-protocol.md` ("Client-side (plugin) local metadata").
 
 ### Configuration
 
@@ -309,13 +202,15 @@ Before copying source or assets, verify the bank-layout editor's license and att
 
 ### Milestone 0: approve contracts
 
+**Status: done (issue #3, September 8, 2026).** `docs/remote-sync-protocol.md` is the frozen v1 wire protocol and `src/test/resources/fixtures/sync/v1/` holds the shared JSON fixtures, pinned by `ProtocolFixturesTest`.
+
 No production code.
 
 1. Record the confirmed automatic synchronization and isolated-storage decisions in all three repositories.
-2. Confirm that the group token authorizes bank-tag editing for anyone who possesses it.
-3. Confirm tombstone retention duration.
-4. Confirm whether `Overwrite remote version` is allowed in v1 or conflicts are remote-wins only.
-5. Freeze JSON examples and API error shapes in the three repositories.
+2. Confirmed: the group token authorizes bank-tag editing for anyone who possesses it.
+3. Confirmed: tombstone retention is 90 days.
+4. Confirmed: `Overwrite remote version` is allowed in v1 behind a confirmation.
+5. Frozen: JSON examples and API error shapes live in `docs/remote-sync-protocol.md` and the v1 fixtures.
 
 Acceptance: plugin, server, and website share the same versioned schema fixtures.
 
@@ -373,7 +268,7 @@ Add Rust server tests for:
 
 #### Green
 
-Add schema migration, models, validators, database functions, and routes under the existing authenticated group scope.
+Add two named blocks to `db::update_schema` (`has_migration_run` / `commit_migration`), models, validators, database functions, and routes under the existing authenticated group scope. Create is `PUT /bank-tags/{tag_id}` with `If-None-Match: *`; the order route is `PUT /bank-tag-order` with `If-Match: "<orderRevision>"`.
 
 #### Refactor
 
@@ -433,7 +328,7 @@ Add the Bank Tags page, API methods, editor adapter, and conflict UI.
 
 #### Refactor
 
-Separate editor state, RuneLite-format conversion, and remote persistence. Do not let Svelte components construct API payloads ad hoc.
+Separate editor state, RuneLite-format conversion, and remote persistence. Add the bank-tag methods to the `Api` class in `site/src/data/api.js`; components never call `fetch` directly.
 
 Acceptance: a website-created tag can be retrieved by the development RuneLite client, edited in RuneLite, saved, and reopened on the website with the same icon, items, and layout.
 

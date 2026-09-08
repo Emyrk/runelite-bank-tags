@@ -101,6 +101,16 @@ The built-in `banktags` group and current `emyrk-bank-tags` data remain unchange
 
 Milestone 1 introduces `BankTagsStorage` as the repository selector used by `TagManager`, `TabManager`, and `LayoutManager`. The synchronized namespace becomes active only when sync is enabled and `syncStorageInitialized` is present. `initializeSyncStorageFromLocal()` copies only tag data keys into the synchronized namespace and leaves local UI preferences and both source groups unchanged.
 
+The wire protocol is frozen in `docs/remote-sync-protocol.md`. Sync metadata lives in `emyrk-bank-tags-sync` under reserved `sync`-prefixed keys that cannot collide with tag data keys:
+
+| Key | Value |
+| --- | --- |
+| `syncGroupRevision` | last applied `groupRevision` (long) |
+| `syncOrderRevision` | last applied `orderRevision` (long) |
+| `syncTag_<tagId>` | JSON `{ "name": "herblore", "revision": 7, "baseHash": "<sha256 hex>" }` — `name` is the current local standardized name; `revision` the last remote revision this client has applied or received on write; `baseHash` the `SharedBankTag.contentHash()` of that synced state |
+| `syncPendingDelete_<tagId>` | JSON `{ "revision": 7 }` — a local delete not yet acknowledged by the server |
+| `syncConflict_<tagId>` | JSON `{ "remote": <tag doc>, "reason": "stale_revision" \| "remote_changed" \| "duplicate_name" \| "tag_exists" }` — present only while the tag is conflicted |
+
 `BankTagSnapshotService` reads and applies one complete tag. `SharedBankTag` is the canonical local model for name, icon, exact and variation item IDs, optional layout, remote identity, revision, and deletion state. Its SHA-256 content hash is deterministic and excludes transport metadata such as tag ID and revision.
 
 ## Mutation flow
