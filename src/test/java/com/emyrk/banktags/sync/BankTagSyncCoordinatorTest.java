@@ -9,6 +9,8 @@ import com.emyrk.banktags.FakeScheduler;
 import com.emyrk.banktags.TagManager;
 import com.emyrk.banktags.sync.BankTagSyncMetadata.Conflict;
 import com.emyrk.banktags.sync.BankTagSyncMetadata.TagMeta;
+import com.emyrk.banktags.sync.BankTagSyncStatus.GlobalState;
+import com.emyrk.banktags.sync.BankTagSyncStatus.TagState;
 import com.emyrk.banktags.sync.model.SharedBankTag;
 import com.emyrk.banktags.tabs.LayoutManager;
 import com.emyrk.banktags.tabs.TabInterface;
@@ -22,6 +24,9 @@ import com.google.inject.Injector;
 import com.google.inject.Provides;
 import com.google.inject.name.Names;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -65,6 +70,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
@@ -154,14 +160,23 @@ public class BankTagSyncCoordinatorTest
 
 		scheduler = new FakeScheduler();
 		clientThread = mock(ClientThread.class);
+		// Runnables run inline on the calling thread, but serialized: the real client thread is single
+		// threaded, so two OkHttp callbacks must never interleave inside coordinator code.
+		final Object clientThreadLock = new Object();
 		doAnswer(invocation ->
 		{
-			((Runnable) invocation.getArgument(0)).run();
+			synchronized (clientThreadLock)
+			{
+				((Runnable) invocation.getArgument(0)).run();
+			}
 			return null;
 		}).when(clientThread).invoke(any(Runnable.class));
 		doAnswer(invocation ->
 		{
-			((Runnable) invocation.getArgument(0)).run();
+			synchronized (clientThreadLock)
+			{
+				((Runnable) invocation.getArgument(0)).run();
+			}
 			return null;
 		}).when(clientThread).invokeLater(any(Runnable.class));
 		tabInterface = mock(TabInterface.class);
@@ -698,6 +713,283 @@ public class BankTagSyncCoordinatorTest
 		assertEquals(0, scheduler.pendingCount());
 	}
 
+	// ------------------------------------------------------------------ status, backoff, credentials
+
+	@Test
+	public void unauthorizedStopsPollingUntilConfigChange() throws Exception
+	{
+		startSynced();
+		assertEquals(GlobalState.INITIALIZING, coordinator.globalState());
+		route("GET", "/bank-tags", json(401, "{\"error\":\"unauthorized\",\"message\":\"nope\"}"));
+
+		scheduler.runDue(0);
+		await(() -> coordinator.globalState() == GlobalState.INVALID_CREDENTIALS);
+		verify(tabInterface).sendChatMessage(BankTagSyncCoordinator.MSG_INVALID_CREDENTIALS);
+		assertEquals(0, scheduler.pendingCount());
+
+		// local edits are still tracked but nothing is sent, and no poll is rescheduled
+		tagManager.addTag(300, "herblore", false);
+		coordinator.onTagMutated("herblore");
+		scheduler.runDue(DEBOUNCE);
+		scheduler.runDue(POLL * 3);
+		Thread.sleep(200);
+		assertEquals(1, requests.size());
+		assertEquals(GlobalState.INVALID_CREDENTIALS, coordinator.globalState());
+
+		// the settings-change path (stop + start) is the only way back
+		coordinator.stop();
+		assertEquals(GlobalState.DISABLED, coordinator.globalState());
+		coordinator.start();
+		assertEquals(1, scheduler.pendingCount());
+		scheduler.runDue(0);
+		await(() -> coordinator.globalState() == GlobalState.ONLINE && !coordinator.isPollInFlight());
+		scheduler.runDue(DEBOUNCE);
+		await(() -> requests("PUT").size() == 1);
+		verify(tabInterface, times(1)).sendChatMessage(BankTagSyncCoordinator.MSG_INVALID_CREDENTIALS);
+	}
+
+	@Test
+	public void networkFailureBacksOffExponentiallyAndCaps() throws Exception
+	{
+		startSynced();
+		long[] expected = {10, 20, 40, 80, 160, 300, 300};
+		for (int i = 0; i < expected.length; i++)
+		{
+			route("GET", "/bank-tags", json(500, "{\"error\":\"internal\",\"message\":\"boom\"}"));
+		}
+
+		long advance = 0;
+		for (int i = 0; i < expected.length; i++)
+		{
+			final int polls = i + 1;
+			scheduler.runDue(advance);
+			await(() -> requests("GET", "/bank-tags").size() == polls && !coordinator.isPollInFlight());
+			assertEquals(GlobalState.OFFLINE, coordinator.globalState());
+			assertEquals(1, scheduler.pendingCount());
+			assertEquals("delay after failure " + polls, expected[i], scheduler.nextDelaySeconds());
+			advance = expected[i];
+		}
+		verify(tabInterface, times(1)).sendChatMessage(BankTagSyncCoordinator.MSG_OFFLINE);
+
+		// success resets the backoff to the configured interval
+		scheduler.runDue(advance);
+		await(() -> coordinator.globalState() == GlobalState.ONLINE && !coordinator.isPollInFlight());
+		assertEquals(POLL, scheduler.nextDelaySeconds());
+		verify(tabInterface, times(1)).sendChatMessage(BankTagSyncCoordinator.MSG_RECONNECTED);
+		assertEquals(8, requests("GET", "/bank-tags").size());
+	}
+
+	@Test
+	public void reconnectResetsBackoffAndResendsDirtyTags() throws Exception
+	{
+		startSynced();
+		route("GET", "/bank-tags", json(500, "{\"error\":\"internal\",\"message\":\"boom\"}"));
+		scheduler.runDue(0);
+		await(() -> coordinator.globalState() == GlobalState.OFFLINE && !coordinator.isPollInFlight());
+		verify(tabInterface, atLeastOnce()).refreshTabs();
+
+		// offline: the debounce fires but nothing is sent
+		tagManager.addTag(300, "herblore", false);
+		coordinator.onTagMutated("herblore");
+		assertEquals(TagState.PENDING, coordinator.tagState("herblore"));
+		scheduler.runDue(DEBOUNCE);
+		Thread.sleep(200);
+		assertEquals(0, requests("PUT").size());
+		assertEquals(TagState.PENDING, coordinator.tagState("herblore"));
+
+		// the backed-off poll (10s after the failure) succeeds and the sweep re-schedules the dirty tag
+		scheduler.runDue(POLL - DEBOUNCE);
+		await(() -> coordinator.globalState() == GlobalState.ONLINE && !coordinator.isPollInFlight());
+		verify(tabInterface).sendChatMessage(BankTagSyncCoordinator.MSG_RECONNECTED);
+		assertEquals(2, scheduler.pendingCount()); // next poll + debounced upload
+		scheduler.runDue(DEBOUNCE);
+		await(() -> requests("PUT").size() == 1 && metadata.tag(HERB_ID).revision == 8);
+		assertEquals(TagState.SYNCED, coordinator.tagState("herblore"));
+		assertEquals(POLL - DEBOUNCE, scheduler.nextDelaySeconds());
+	}
+
+	// ------------------------------------------------------------------ recovery actions
+
+	@Test
+	public void useRemoteVersionAppliesAndClearsConflict() throws Exception
+	{
+		startSynced();
+		tagManager.addTag(300, "herblore", false);
+		route("GET", "/bank-tags", json(200, manifest(43, 3, Arrays.asList(
+			entry(HERB_ID, "herblore", 8, false), entry(SLAYER_ID, "slayer", 1, false)))));
+		route("GET", "/bank-tags/" + HERB_ID, json(200, tagDoc(HERB_ID, "herblore", 5678, Arrays.asList(1, 2), null, 8, false)));
+
+		scheduler.runDue(0);
+		await(() -> metadata.conflict(HERB_ID) != null && !coordinator.isPollInFlight());
+		assertEquals(TagState.CONFLICTED, coordinator.tagState("herblore"));
+		verify(tabInterface).sendChatMessage("Bank tag sync: 'herblore' changed on the server and locally. Right-click the tab to resolve.");
+
+		coordinator.useRemoteVersion("herblore");
+
+		assertNull(metadata.conflict(HERB_ID));
+		assertEquals(8, metadata.tag(HERB_ID).revision);
+		assertEquals("5678", values.get(FakeConfigManager.key(SYNC, "icon_herblore")));
+		assertEquals("herblore", values.get(FakeConfigManager.key(SYNC, "item_1")));
+		assertNull(values.get(FakeConfigManager.key(SYNC, "item_300")));
+		assertEquals(snapshots.snapshot("herblore").contentHash(), metadata.tag(HERB_ID).baseHash);
+		assertEquals(TagState.SYNCED, coordinator.tagState("herblore"));
+		verify(tabInterface, times(2)).refreshTabs();
+
+		// the applied remote state is not uploaded back
+		scheduler.runDue(POLL);
+		scheduler.runDue(DEBOUNCE);
+		Thread.sleep(200);
+		assertEquals(0, requests("PUT").size());
+	}
+
+	@Test
+	public void useRemoteVersionOnTombstoneDeletesLocally() throws Exception
+	{
+		startSynced();
+		tagManager.addTag(300, "herblore", false);
+		route("GET", "/bank-tags", json(200, manifest(43, 4, Collections.singletonList(SLAYER_ID), Arrays.asList(
+			entry(HERB_ID, "herblore", 8, true), entry(SLAYER_ID, "slayer", 1, false)))));
+
+		scheduler.runDue(0);
+		await(() -> metadata.conflict(HERB_ID) != null && !coordinator.isPollInFlight());
+		assertTrue(metadata.conflict(HERB_ID).remote.isDeleted());
+		assertNotNull(tabManager.find("herblore"));
+
+		coordinator.useRemoteVersion("herblore");
+
+		assertNull(metadata.conflict(HERB_ID));
+		assertNull(metadata.tag(HERB_ID));
+		assertNull(tabManager.find("herblore"));
+		assertEquals("slayer", values.get(FakeConfigManager.key(SYNC, "tagtabs")));
+		assertNull(values.get(FakeConfigManager.key(SYNC, "icon_herblore")));
+		assertNull(values.get(FakeConfigManager.key(SYNC, "item_300")));
+		assertEquals(TagState.LOCAL_ONLY, coordinator.tagState("herblore"));
+
+		scheduler.runDue(DEBOUNCE);
+		Thread.sleep(200);
+		assertEquals(0, requests("DELETE").size());
+		assertEquals(0, requests("PUT").size());
+	}
+
+	@Test
+	public void overwriteRemoteVersionUsesConflictRevision() throws Exception
+	{
+		startSynced();
+		tagManager.addTag(300, "herblore", false);
+		String staleRevision = new String(Files.readAllBytes(
+			Paths.get("src", "test", "resources", "fixtures", "sync", "v1", "error-stale-revision.json")), StandardCharsets.UTF_8);
+		route("PUT", "/bank-tags/" + HERB_ID, json(409, staleRevision));
+		route("GET", "/bank-tags/" + HERB_ID, json(200, tagDoc(HERB_ID, "herblore", 952, Arrays.asList(500, 501), null, 8, false)));
+
+		coordinator.onTagMutated("herblore");
+		scheduler.runDue(DEBOUNCE);
+		await(() -> metadata.conflict(HERB_ID) != null);
+		assertEquals(8, metadata.conflict(HERB_ID).remote.getRevision());
+		assertEquals(TagState.CONFLICTED, coordinator.tagState("herblore"));
+
+		coordinator.overwriteRemoteVersion("herblore");
+		await(() -> requests("PUT").size() == 2 && metadata.tag(HERB_ID).revision == 9);
+
+		RecordedRequest overwrite = requests("PUT").get(1);
+		assertEquals(BASE + "/bank-tags/" + HERB_ID, overwrite.getPath());
+		assertEquals("\"8\"", overwrite.getHeader("If-Match"));
+		assertNull(overwrite.getHeader("If-None-Match"));
+		assertNull(metadata.conflict(HERB_ID));
+		assertEquals("herblore", values.get(FakeConfigManager.key(SYNC, "item_300")));
+		assertEquals(snapshots.snapshot("herblore").contentHash(), metadata.tag(HERB_ID).baseHash);
+		assertEquals(TagState.SYNCED, coordinator.tagState("herblore"));
+	}
+
+	@Test
+	public void overwriteRemoteOnTombstoneMintsNewId() throws Exception
+	{
+		startSynced();
+		tagManager.addTag(300, "herblore", false);
+		route("PUT", "/bank-tags/" + HERB_ID, json(404, "{\"error\":\"tag_not_found\",\"message\":\"gone\"}"));
+
+		coordinator.onTagMutated("herblore");
+		scheduler.runDue(DEBOUNCE);
+		await(() -> metadata.conflict(HERB_ID) != null);
+		assertTrue(metadata.conflict(HERB_ID).remote.isDeleted());
+
+		coordinator.overwriteRemoteVersion("herblore");
+		await(() -> tagRequests("PUT").size() == 2 && metadata.tag(metadata.tagIdForName("herblore")).revision > 0);
+
+		String newId = metadata.tagIdForName("herblore");
+		assertNotEquals(HERB_ID, newId);
+		assertNull(metadata.tag(HERB_ID));
+		assertNull(metadata.conflict(HERB_ID));
+		RecordedRequest create = tagRequests("PUT").get(1);
+		assertEquals(BASE + "/bank-tags/" + newId, create.getPath());
+		assertEquals("*", create.getHeader("If-None-Match"));
+		assertNull(create.getHeader("If-Match"));
+		assertEquals("herblore", gson.fromJson(create.getBody().readUtf8(), JsonObject.class).get("name").getAsString());
+		assertEquals(TagState.SYNCED, coordinator.tagState("herblore"));
+	}
+
+	@Test
+	public void retryClearsRejection() throws Exception
+	{
+		startSynced();
+		tagManager.addTag(300, "herblore", false);
+		route("PUT", "/bank-tags/" + HERB_ID, json(400, "{\"error\":\"invalid_tag\",\"message\":\"bad\"}"));
+
+		coordinator.onTagMutated("herblore");
+		scheduler.runDue(DEBOUNCE);
+		await(() -> coordinator.tagState("herblore") == TagState.REJECTED);
+		verify(tabInterface).sendChatMessage("Bank tag sync: 'herblore' was rejected by the server (invalid_tag).");
+		assertEquals(7, metadata.tag(HERB_ID).revision);
+
+		// the poll sweep leaves a rejected tag alone
+		scheduler.runDue(POLL);
+		await(() -> requests("GET", "/bank-tags").size() == 2 && !coordinator.isPollInFlight());
+		scheduler.runDue(DEBOUNCE);
+		Thread.sleep(200);
+		assertEquals(1, requests("PUT").size());
+		assertEquals(TagState.REJECTED, coordinator.tagState("herblore"));
+
+		coordinator.retry("herblore");
+		await(() -> requests("PUT").size() == 2 && metadata.tag(HERB_ID).revision == 8);
+		assertEquals(TagState.SYNCED, coordinator.tagState("herblore"));
+		assertEquals(0, scheduler.nextDelaySeconds()); // an immediate poll was scheduled
+		scheduler.runDue(0);
+		await(() -> requests("GET", "/bank-tags").size() == 3 && !coordinator.isPollInFlight());
+	}
+
+	@Test
+	public void tagStateTransitions() throws Exception
+	{
+		startSynced();
+		assertEquals(TagState.SYNCED, coordinator.tagState("herblore"));
+		assertEquals(TagState.LOCAL_ONLY, coordinator.tagState("nope"));
+
+		seedLocalTab(SYNC, "fresh", 1, Collections.singletonList(1), null);
+		tabManager.reload();
+		assertEquals(TagState.LOCAL_ONLY, coordinator.tagState("fresh"));
+
+		coordinator.onTagMutated("fresh");
+		assertEquals(TagState.PENDING, coordinator.tagState("fresh"));
+		String freshId = metadata.tagIdForName("fresh");
+		scheduler.runDue(DEBOUNCE);
+		await(() -> metadata.tag(freshId).revision > 0);
+		assertEquals(TagState.SYNCED, coordinator.tagState("fresh"));
+
+		tagManager.addTag(2, "fresh", false);
+		assertEquals(TagState.PENDING, coordinator.tagState("fresh"));
+		route("PUT", "/bank-tags/" + freshId, json(409, "{\"error\":\"stale_revision\",\"message\":\"stale\",\"current\":"
+			+ "{\"tagId\":\"" + freshId + "\",\"name\":\"fresh\",\"revision\":5,\"deleted\":false}}"));
+		route("GET", "/bank-tags/" + freshId, json(200, tagDoc(freshId, "fresh", 1, Arrays.asList(1, 3), null, 5, false)));
+		coordinator.onTagMutated("fresh");
+		scheduler.runDue(DEBOUNCE);
+		await(() -> coordinator.tagState("fresh") == TagState.CONFLICTED);
+
+		coordinator.useRemoteVersion("fresh");
+		assertEquals(TagState.SYNCED, coordinator.tagState("fresh"));
+		assertEquals(5, metadata.tag(freshId).revision);
+		assertEquals("fresh", values.get(FakeConfigManager.key(SYNC, "item_3")));
+		assertNull(values.get(FakeConfigManager.key(SYNC, "item_2")));
+	}
+
 	// ------------------------------------------------------------------ helpers
 
 	/**
@@ -778,6 +1070,22 @@ public class BankTagSyncCoordinatorTest
 		for (RecordedRequest request : requests)
 		{
 			if (method.equals(request.getMethod()))
+			{
+				result.add(request);
+			}
+		}
+		return result;
+	}
+
+	/**
+	 * Requests of {@code method} against a tag document route (excludes the order route).
+	 */
+	private List<RecordedRequest> tagRequests(String method)
+	{
+		List<RecordedRequest> result = new ArrayList<>();
+		for (RecordedRequest request : requests(method))
+		{
+			if (request.getPath().startsWith(BASE + "/bank-tags/"))
 			{
 				result.add(request);
 			}

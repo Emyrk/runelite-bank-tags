@@ -44,6 +44,12 @@ import com.emyrk.banktags.tabs.TabInterface;
 import net.runelite.client.plugins.cluescrolls.ClueScrollService;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import java.util.Arrays;
+import java.util.Collections;
+import org.mockito.ArgumentCaptor;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -193,6 +199,52 @@ public class BankTagsPluginTest
 		order.verify(syncCoordinator).stop();
 		order.verify(syncCoordinator).start();
 		verify(clientThread).invokeLater(org.mockito.ArgumentMatchers.any(Runnable.class));
+	}
+
+	@Test
+	public void resetSyncCacheToggleResetsAndRestarts()
+	{
+		String sync = BankTagsStorage.SYNC_DATA_GROUP;
+		when(configManager.getConfigurationKeys(anyString())).thenAnswer(invocation ->
+			invocation.getArgument(0).equals(sync + ".")
+				? Arrays.asList(sync + ".tagtabs", sync + ".item_4151", sync + ".syncTag_abc", sync + "." + BankTagsStorage.SYNC_STORAGE_INITIALIZED_KEY)
+				: Collections.emptyList());
+		ConfigChanged event = new ConfigChanged();
+		event.setGroup(BankTagsStorage.SYNC_SETTINGS_GROUP);
+		event.setKey("resetSyncCache");
+		event.setNewValue("true");
+
+		bankTagsPlugin.onConfigChanged(event);
+
+		InOrder order = inOrder(configManager, syncCoordinator);
+		order.verify(configManager).setConfiguration(BankTagsStorage.SYNC_SETTINGS_GROUP, "resetSyncCache", false);
+		order.verify(syncCoordinator).stop();
+		order.verify(configManager).unsetConfiguration(sync, "tagtabs");
+		order.verify(configManager).unsetConfiguration(sync, "item_4151");
+		order.verify(configManager).unsetConfiguration(sync, "syncTag_abc");
+		order.verify(configManager).unsetConfiguration(sync, BankTagsStorage.SYNC_STORAGE_INITIALIZED_KEY);
+		verify(configManager, never()).unsetConfiguration(eq(BankTagsPlugin.CONFIG_GROUP), anyString());
+		verify(configManager, never()).unsetConfiguration(eq("banktags"), anyString());
+		verify(syncCoordinator, never()).start();
+
+		ArgumentCaptor<Runnable> onClientThread = ArgumentCaptor.forClass(Runnable.class);
+		verify(clientThread).invokeLater(onClientThread.capture());
+		onClientThread.getValue().run();
+		verify(syncCoordinator).start();
+	}
+
+	@Test
+	public void resetSyncCacheWriteBackDoesNotRestart()
+	{
+		ConfigChanged event = new ConfigChanged();
+		event.setGroup(BankTagsStorage.SYNC_SETTINGS_GROUP);
+		event.setKey("resetSyncCache");
+		event.setNewValue("false");
+
+		bankTagsPlugin.onConfigChanged(event);
+
+		verifyNoInteractions(syncCoordinator);
+		verify(configManager, never()).unsetConfiguration(anyString(), anyString());
 	}
 
 	@Test

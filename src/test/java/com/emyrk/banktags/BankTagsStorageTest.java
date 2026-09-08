@@ -58,6 +58,36 @@ public class BankTagsStorageTest
 			BankTagsStorage.SYNC_STORAGE_INITIALIZED_KEY))));
 	}
 
+	@Test
+	public void resetSyncStorageClearsOnlySyncGroup()
+	{
+		values.put(key(BankTagsPlugin.CONFIG_GROUP, "tagtabs"), "herbs");
+		values.put(key(BankTagsPlugin.CONFIG_GROUP, "icon_herbs"), "952");
+		values.put(key(BankTagsPlugin.CONFIG_GROUP, "item_100"), "herbs");
+		values.put(key(BankTagsPlugin.CONFIG_GROUP, "rememberTab"), "false");
+		values.put(key("banktags", "item_100"), "builtin");
+		values.put(key(BankTagsStorage.SYNC_SETTINGS_GROUP, "enabled"), "true");
+		values.put(key(BankTagsStorage.SYNC_DATA_GROUP, "tagtabs"), "herbs,slayer");
+		values.put(key(BankTagsStorage.SYNC_DATA_GROUP, "icon_herbs"), "952");
+		values.put(key(BankTagsStorage.SYNC_DATA_GROUP, "layout_herbs"), "100,-1,200");
+		values.put(key(BankTagsStorage.SYNC_DATA_GROUP, "hidden_herbs"), "true");
+		values.put(key(BankTagsStorage.SYNC_DATA_GROUP, "item_100"), "herbs");
+		values.put(key(BankTagsStorage.SYNC_DATA_GROUP, "syncGroupRevision"), "42");
+		values.put(key(BankTagsStorage.SYNC_DATA_GROUP, "syncTag_abc"), "{}");
+		values.put(key(BankTagsStorage.SYNC_DATA_GROUP, "syncConflict_abc"), "{}");
+		values.put(key(BankTagsStorage.SYNC_DATA_GROUP, BankTagsStorage.SYNC_STORAGE_INITIALIZED_KEY), "true");
+		Map<String, String> localBefore = FakeConfigManager.group(values, BankTagsPlugin.CONFIG_GROUP);
+
+		storage.resetSyncStorage();
+
+		assertTrue(FakeConfigManager.group(values, BankTagsStorage.SYNC_DATA_GROUP).isEmpty());
+		assertEquals(localBefore, FakeConfigManager.group(values, BankTagsPlugin.CONFIG_GROUP));
+		assertEquals("builtin", values.get(key("banktags", "item_100")));
+		assertEquals("true", values.get(key(BankTagsStorage.SYNC_SETTINGS_GROUP, "enabled")));
+		when(syncConfig.enabled()).thenReturn(true);
+		assertFalse(storage.isSyncStorageActive());
+	}
+
 	private static String key(String group, String name)
 	{
 		return FakeConfigManager.key(group, name);

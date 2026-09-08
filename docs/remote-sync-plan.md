@@ -278,7 +278,18 @@ Acceptance: server tests pass and API fixtures match the plugin fixtures byte-fo
 
 ### Milestone 3: RuneLite HTTP sync
 
-**Status: done (3a client in #13, 3b coordinator in issue #5) except the conflict recovery UI, status display, backoff, and reset action, which are Milestone 3c (issue #6).** Conflicts are recorded in `syncConflict_<tagId>` but not yet surfaced. The tests below live in `BankTagSyncClientTest`, `BankTagSyncCoordinatorTest`, and `BankTagsPluginTest`.
+**Status: done.** 3a client in #13, 3b coordinator in issue #5, 3c (issue #6) status model, backoff and `401` handling, conflict recovery actions on the tab, and the reset action. The tests below live in `BankTagSyncClientTest`, `BankTagSyncCoordinatorTest`, `BankTagsStorageTest`, and `BankTagsPluginTest`.
+
+Milestone 3c checklist:
+
+- [x] `BankTagSyncStatus` (`GlobalState`, `TagState`); `BankTagSyncCoordinator.globalState()` / `tagState(tag)` derived from metadata, with one private `setGlobalState` transition point.
+- [x] Self-rescheduling poll with exponential backoff (`pollIntervalSeconds × 2^n`, capped at 300 s, reset on success); `OFFLINE` after the first failure, `ONLINE` on the next success; uploads wait while offline and are re-swept on reconnect.
+- [x] `401` from any call → `INVALID_CREDENTIALS`, all timers cancelled, no reschedule until the settings change.
+- [x] Chat messages once per transition, routed through `TabInterface.sendChatMessage` on the client thread, never containing the token, URL, or a payload.
+- [x] Tab right-click actions `TAB_OP_SYNC_USE_REMOTE` (7), `TAB_OP_SYNC_OVERWRITE_REMOTE` (8, behind a chatbox confirmation), `TAB_OP_SYNC_RETRY` (9), rebuilt from `TagState` on every refresh.
+- [x] `useRemoteVersion`, `overwriteRemoteVersion` (conflict revision as `If-Match`; a fresh id when the remote is a tombstone), `retry`.
+- [x] `BankTagsStorage.resetSyncStorage()` and the self-resetting `resetSyncCache` config action.
+- [x] Tests: `unauthorizedStopsPollingUntilConfigChange`, `networkFailureBacksOffExponentiallyAndCaps`, `reconnectResetsBackoffAndResendsDirtyTags`, `useRemoteVersionAppliesAndClearsConflict`, `useRemoteVersionOnTombstoneDeletesLocally`, `overwriteRemoteVersionUsesConflictRevision`, `overwriteRemoteOnTombstoneMintsNewId`, `retryClearsRejection`, `tagStateTransitions`, `resetSyncStorageClearsOnlySyncGroup`, `resetSyncCacheToggleResetsAndRestarts`.
 
 #### Red
 

@@ -23,6 +23,8 @@ On shutdown it stops the coordinator first (cancelling polling, debounces, and i
 
 A `ConfigChanged` event for `emyrk-bank-tags-sync-settings` stops and restarts the coordinator. When the `enabled` flag flips, the plugin also reloads `TabManager` and reinitializes the bank because `BankTagsStorage.getActiveGroup()` switches repositories immediately.
 
+The `resetSyncCache` item in that group is a self-resetting action (RuneLite config panels have no buttons; its `warning` is the confirmation dialog). When its value becomes `true` the plugin immediately writes it back to `false`, stops the coordinator, calls `BankTagsStorage.resetSyncStorage()` (which unsets every `emyrk-bank-tags-sync.*` key: tag data, `sync*` metadata, and the `syncStorageInitialized` marker, never touching `emyrk-bank-tags` or `banktags`), then on the client thread reloads `TabManager`, reinitializes the bank, and starts the coordinator again, which re-runs the first-enable path and reloads the group's tags from the server. The write-back event (`false`) is ignored so the coordinator is not restarted twice.
+
 The built-in Bank Tags plugin must be disabled while this plugin is active because both modify the same bank interface.
 
 ## Components
@@ -61,6 +63,17 @@ The ordered names are saved to `tagtabs`. Each icon is saved separately under `i
 - Add or remove items by menu action or drag.
 - Enable, modify, or remove a layout.
 - Restore the remembered active tab.
+- Resolve sync conflicts and retry rejected uploads from the tab's right-click menu.
+
+Tab right-click entries are `Widget.setAction(op, text)` slots dispatched by `opTagTab` on the `TAB_OP_*` constants. Slots 1–6 are the classic actions; slots 7–9 are the sync recovery actions, written on every rebuild by `addSyncActions` from `BankTagSyncCoordinator.tagState(tag)` (a slot that does not apply is set to `null` so a rebuilt widget never keeps a stale entry):
+
+| Constant | Slot | Text | Shown when | Effect |
+| --- | --- | --- | --- | --- |
+| `TAB_OP_SYNC_USE_REMOTE` | 7 | `Sync: use server version` | `TagState.CONFLICTED` | `syncCoordinator.useRemoteVersion(tag)` |
+| `TAB_OP_SYNC_OVERWRITE_REMOTE` | 8 | `Sync: overwrite server version` | `TagState.CONFLICTED` | chatbox confirmation, then `syncCoordinator.overwriteRemoteVersion(tag)` on the client thread |
+| `TAB_OP_SYNC_RETRY` | 9 | `Sync: retry` | `TagState.REJECTED`, or `TagState.PENDING` while `GlobalState.OFFLINE` | `syncCoordinator.retry(tag)` |
+
+`TabInterface.sendChatMessage(String)` is public so the coordinator can route its console messages through it (always via `ClientThread.invoke`).
 
 When the bank opens, it loads tab names from configuration, loads each icon, builds widgets, and optionally opens the remembered tab. UI callbacks that begin in chatbox completion handlers return to the client thread before changing plugin state.
 
@@ -126,10 +139,19 @@ Milestone 3b adds `BankTagSyncMetadata` and `BankTagSyncCoordinator`.
 
 - **First enable** (no `syncStorageInitialized` marker): fetches the manifest. `401` stops with a chat message. A group with tags is fetched in full and applied into the sync namespace with `applyingRemote` set, then the marker is written and the bank reinitialized; local tags are untouched. An empty group copies the local tags into the sync namespace, mints a tag ID (`revision 0`) per tab, and schedules a create for each.
 - **Polling** on RuneLite's shared `ScheduledExecutorService` with `If-None-Match`; only one poll is in flight. The manifest decision table from the protocol document produces fetches, local deletes, and conflict records; every needed tag is fetched first, and local state is only touched once all fetches succeeded. After applying, `TabInterface.refreshTabs()` rebuilds the UI, dirty tags are re-scheduled, and pending deletes are retried.
-- **Uploads** are debounced per tag and send the snapshot taken on the client thread; the stored `baseHash` is the hash of what was sent. `409` and `404` responses become `syncConflict_` records (conflicts are recorded, not surfaced, until Milestone 3c). Network and server errors leave the tag dirty for the next poll sweep; other rejections are logged at debug and dropped until the tag changes again.
+- **Uploads** are debounced per tag and send the snapshot taken on the client thread; the stored `baseHash` is the hash of what was sent. `409` and `404` responses become `syncConflict_` records and the tag becomes `CONFLICTED`. Network and server errors leave the tag dirty for the next poll sweep; while the coordinator is `OFFLINE` or has `INVALID_CREDENTIALS` the debounce still fires but nothing is sent. `400`/`413`/`428` and unreadable responses mark the tag `REJECTED` (an in-memory set): the poll sweep skips it until the user picks `Sync: retry` or changes the tag again.
 - **Deletes** are recorded as `syncPendingDelete_` and sent with `If-Match`; `409`/`404` clear the pending record and let the next poll re-create the tab if it still exists remotely.
 - **Order** uploads are debounced; a `409` reconciles the local order with the server's manifest and retries exactly once. A successful order response is a full manifest and is processed like a poll result.
 - **Threading**: callbacks hop to the client thread through `ClientThread.invoke`; a generation counter makes replies from before `stop()` inert; nothing blocks.
+
+### Sync status, backoff, and recovery (Milestone 3c)
+
+`BankTagSyncStatus` holds the two observable enums. Menu text and chat messages read them, never exceptions or HTTP codes.
+
+- `GlobalState`: `DISABLED` → `INITIALIZING` on `start()`, `ONLINE` after any successful request, `OFFLINE` after a `NETWORK`/`SERVER_ERROR` poll or first-enable failure, `INVALID_CREDENTIALS` after a `401` from any call. Every transition goes through the private `setGlobalState`, the only place that emits the connection messages (`invalid group name or token…`, `server unreachable, retrying in the background…`, `reconnected.`), each once per transition. Transitions into or out of `OFFLINE` refresh the tab strip because the `Sync: retry` entry depends on it.
+- `TagState` is derived on demand by `tagState(tag)`: no `syncTag_` (or sync inactive) → `LOCAL_ONLY`; a `syncConflict_` for the tab's id, or for a remote tag of the same name (`duplicate_name`) → `CONFLICTED`; in the rejected set → `REJECTED`; a debounce pending, an upload in flight, or snapshot hash ≠ `baseHash` → `PENDING`; else `SYNCED`. Conflicts and rejections are announced once when they appear (`'<name>' changed on the server and locally…`, `'<name>' was rejected by the server (<code>).`) and refresh the tab strip; a `PENDING`→`SYNCED` upload while online changes no menu entry and does not rebuild the bank.
+- **Backoff**: polling is a self-rescheduling `schedule(poll, delay)` instead of a fixed-delay timer. After success the delay is `pollIntervalSeconds`; after a `NETWORK`/`SERVER_ERROR` failure it is `min(pollIntervalSeconds × 2^consecutiveFailures, 300)` (10, 20, 40, 80, 160, 300, 300… for the default interval), reset on the next success. A first-enable transport failure retries on the same schedule. On `401` every timer is cancelled and nothing is rescheduled; the settings-change `stop(); start()` is the only way back.
+- **Recovery actions** (client thread): `useRemoteVersion` applies the conflict's remote document with `applyingRemote` set (or deletes the tab when it is a tombstone), stores the remote revision and hash, and clears the conflict. `overwriteRemoteVersion` sends the local snapshot with `If-Match: "<conflict revision>"`; when the remote is a tombstone the id cannot be re-created, so a fresh id is minted (`revision 0`) and the tab is created under it, the old id is forgotten. A further `409` re-records the conflict. `retry` drops the rejection, resets the backoff, uploads immediately even while `OFFLINE`, and schedules an immediate poll. Every action ends with `TabInterface.refreshTabs()`.
 
 Guice wiring note: `TabInterface` and `LayoutManager` depend on the coordinator, and the coordinator depends on `TabInterface` and (through `BankTagSnapshotService`) on `LayoutManager`. The cycle is broken with `Provider<TabInterface>` in the coordinator and `Provider<BankTagSyncCoordinator>` in `LayoutManager`.
 
@@ -171,16 +193,16 @@ Only names that have a tab are synchronized; item tags without a tab stay local.
 
 ## Existing tests
 
-`BankTagsPluginTest` uses Mockito and Guice field binding. It currently verifies bank search behavior for explicit `tag:` searches, normal searches, and fall-through behavior.
+`BankTagsPluginTest` uses Mockito and Guice field binding. It verifies bank search behavior for explicit `tag:` searches, normal searches, and fall-through behavior, the sync-settings restart, and the `resetSyncCache` action (flag written back to `false`, only the sync group cleared, restart on the client thread).
+
+`BankTagsStorageTest` covers repository selection, the first-enable copy, and `resetSyncStorage`. `BankTagSyncClientTest` and `BankTagSyncCoordinatorTest` run against MockWebServer with a deterministic `FakeScheduler`; the coordinator suite covers first enable, debounce, conflicts, remote apply without feedback upload, tombstones, order reconciliation, backoff delays, `401` handling, the three recovery actions, and the `TagState` transitions. `ProtocolFixturesTest` pins the JSON fixtures.
 
 There are no tests yet for:
 
-- Tag persistence mutations.
-- Tab ordering and icons.
+- Tab ordering and icons outside the sync snapshot.
 - Layout serialization.
 - Migration.
 - Import and export.
-- Networking or conflict handling.
 
 ## Build
 
