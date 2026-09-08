@@ -199,3 +199,12 @@ All decided on September 8, 2026 (issue #3). The normative protocol is `docs/rem
 - Offline edit queue behavior: dirty tags stay dirty locally and are retried with exponential backoff, capped at 5 minutes.
 - Maximum document size and rate limits: 100 000 bytes per request body; 4000 item IDs and 4000 layout slots per tag; names 1–50 characters.
 - User-visible status and conflict messages: `Use remote version`, `Overwrite remote version`, and `Retry sync` per conflicted tag; `invalid credentials` status on `401`.
+
+Coordinator decisions made while implementing Milestone 3b (issue #5):
+
+- Conflicts are recorded in `syncConflict_<tagId>` and the tag stops uploading until the conflict is cleared; surfacing and recovery actions are Milestone 3c. Local data is never modified by a conflict.
+- A remote tag whose id is unknown locally but whose name matches a local tab that was never uploaded (`revision 0` or no metadata) is recorded as a `duplicate_name` conflict instead of being merged into the local tab.
+- A manifest entry for an id with a local `syncPendingDelete_` record is ignored until the delete is acknowledged or rejected, so a tab being deleted is not re-created by a concurrent poll.
+- After a successful create the coordinator schedules an order upload, because the server appends new ids to the group order and the local position may differ. While an order upload is pending or in flight, a remote order change seen by a poll is not applied locally (the pending upload wins; its `orderRevision` is still updated so the upload carries the current precondition).
+- The manifest returned by a successful order upload is processed exactly like a poll result; `syncGroupRevision` only advances after the changes it reveals have been applied, so no concurrent remote write can be skipped.
+- Tag and order writes do not advance `syncGroupRevision`; the next poll fetches one full manifest instead of a `304`.

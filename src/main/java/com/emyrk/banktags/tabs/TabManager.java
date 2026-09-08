@@ -104,6 +104,41 @@ public class TabManager
 		return new ArrayList<>(loadAllTabNames());
 	}
 
+	/**
+	 * Current in-memory tab order.
+	 */
+	public List<String> tabNames()
+	{
+		return tabs.stream().map(TagTab::getTag).collect(Collectors.toList());
+	}
+
+	/**
+	 * Reorders the tabs so those named in {@code orderedTags} come first, in that order, followed by
+	 * every remaining tab in its current relative order, then persists.
+	 */
+	public void reorder(List<String> orderedTags)
+	{
+		List<TagTab> reordered = new ArrayList<>(tabs.size());
+		for (String tag : orderedTags)
+		{
+			TagTab tab = find(tag);
+			if (tab != null && !reordered.contains(tab))
+			{
+				reordered.add(tab);
+			}
+		}
+		for (TagTab tab : tabs)
+		{
+			if (!reordered.contains(tab))
+			{
+				reordered.add(tab);
+			}
+		}
+		tabs.clear();
+		tabs.addAll(reordered);
+		save();
+	}
+
 	public TagTab get(String tag)
 	{
 		return load(tag);

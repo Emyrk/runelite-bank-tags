@@ -88,6 +88,7 @@ import com.emyrk.banktags.BankTagsPlugin;
 import static com.emyrk.banktags.BankTagsPlugin.TAG_SEARCH;
 import static com.emyrk.banktags.BankTagsPlugin.VAR_TAG_SUFFIX;
 import com.emyrk.banktags.BankTagsService;
+import com.emyrk.banktags.sync.BankTagSyncCoordinator;
 import com.emyrk.banktags.TagManager;
 import net.runelite.client.ui.JagexColors;
 import net.runelite.client.util.ColorUtil;
@@ -154,6 +155,7 @@ public class TabInterface
 	private final BankSearch bankSearch;
 	private final ChatboxItemSearch searchProvider;
 	private final ChatMessageManager chatMessageManager;
+	private final BankTagSyncCoordinator syncCoordinator;
 
 	private boolean enabled;
 	@Getter
@@ -186,7 +188,8 @@ public class TabInterface
 		final BankTagsConfig config,
 		final BankSearch bankSearch,
 		final ChatboxItemSearch searchProvider,
-		final ChatMessageManager chatMessageManager
+		final ChatMessageManager chatMessageManager,
+		final BankTagSyncCoordinator syncCoordinator
 		)
 	{
 		this.client = client;
@@ -201,6 +204,7 @@ public class TabInterface
 		this.bankSearch = bankSearch;
 		this.searchProvider = searchProvider;
 		this.chatMessageManager = chatMessageManager;
+		this.syncCoordinator = syncCoordinator;
 	}
 
 	@Subscribe
@@ -403,6 +407,7 @@ public class TabInterface
 				{
 					tagManager.addTag(item, activeTag, false);
 				}
+				syncCoordinator.onTagMutated(activeTag);
 
 				reloadActiveTab();
 			}
@@ -420,6 +425,10 @@ public class TabInterface
 					for (Integer item : items)
 					{
 						tagManager.addTags(item, tags, false);
+					}
+					for (String tag : tags)
+					{
+						syncCoordinator.onTagMutated(tag);
 					}
 
 					reloadActiveTab();
@@ -440,6 +449,8 @@ public class TabInterface
 						{
 							loadTab(tagName);
 							tabManager.save();
+							syncCoordinator.onTagMutated(tagName);
+							syncCoordinator.onTabOrderChanged();
 
 							repositionButtons();
 							rebuildTabs();
@@ -468,6 +479,8 @@ public class TabInterface
 
 					tabManager.add(tab);
 					tabManager.save();
+					syncCoordinator.onTagMutated(tab.getTag());
+					syncCoordinator.onTabOrderChanged();
 
 					repositionButtons();
 					rebuildTabs();
@@ -645,6 +658,7 @@ public class TabInterface
 						{
 							tab.setIconItemId(itemId);
 							tabManager.save();
+							syncCoordinator.onTagMutated(tab.getTag());
 							clientThread.invokeLater(() ->
 							{
 								rebuildTabs();
@@ -664,11 +678,13 @@ public class TabInterface
 				{
 					layout = new Layout(tag);
 					layoutManager.saveLayout(layout);
+					syncCoordinator.onTagMutated(tag);
 					sendChatMessage("Tag tab '" + tag + "' is now in layout mode. You may reorder the items without changing their order in the bank.");
 				}
 				else
 				{
 					layoutManager.removeLayout(tag);
+					syncCoordinator.onTagMutated(tag);
 					layout = null;
 					sendChatMessage("Tag tab '" + tag + "' is no longer in layout mode");
 				}
@@ -792,6 +808,7 @@ public class TabInterface
 							layoutManager.saveLayout(activeLayout);
 						}
 						tagManager.removeTag(itemId, activeTag);
+						syncCoordinator.onTagMutated(activeTag);
 						bankSearch.layoutBank(); // re-layout to filter the removed item out
 					});
 			}
@@ -844,6 +861,7 @@ public class TabInterface
 		log.debug("Duplicate item {} at {}", itemManager.getItemComposition(id).getName(), e.getParam0());
 		activeLayout.addItemAfter(id, e.getParam0());
 		layoutManager.saveLayout(activeLayout);
+		syncCoordinator.onTagMutated(activeLayout.getTag());
 		bankSearch.layoutBank();
 	}
 
@@ -851,6 +869,7 @@ public class TabInterface
 	{
 		activeLayout.removeItemAtPos(e.getParam0());
 		layoutManager.saveLayout(activeLayout);
+		syncCoordinator.onTagMutated(activeLayout.getTag());
 		bankSearch.layoutBank();
 	}
 
@@ -926,6 +945,7 @@ public class TabInterface
 				// Tag an item dragged on a tag tab
 				log.debug("Dragged {} to tab {}", draggedWidget.getItemId(), Text.removeTags(draggedOn.getName()));
 				tagManager.addTag(draggedWidget.getItemId(), draggedOn.getName(), shiftDown);
+				syncCoordinator.onTagMutated(Text.removeTags(draggedOn.getName()));
 				reloadActiveTab();
 			}
 			else if ((tagTabActive && draggedWidget.getId() == InterfaceID.Bankmain.ITEMS && draggedOn.getId() == InterfaceID.Bankmain.ITEMS)
@@ -984,6 +1004,7 @@ public class TabInterface
 		}
 
 		tabManager.save();
+		syncCoordinator.onTabOrderChanged();
 		rebuildTabs();
 		rebuildTagTabTab();
 	}
@@ -1033,6 +1054,8 @@ public class TabInterface
 		tabManager.save();
 
 		layoutManager.removeLayout(tag);
+		syncCoordinator.onTagDeleted(tag);
+		syncCoordinator.onTabOrderChanged();
 
 		repositionButtons();
 		rebuildTabs();
@@ -1073,6 +1096,7 @@ public class TabInterface
 						}
 
 						tagManager.renameTag(oldTag, newTag); // rename tag on items
+						syncCoordinator.onTagRenamed(oldTag, newTag);
 
 						rebuildTabs();
 						rebuildTagTabTab();
@@ -1087,6 +1111,7 @@ public class TabInterface
 								{
 									tagManager.renameTag(oldTag, newTag);
 									deleteTab(oldTag);
+									syncCoordinator.onTagMutated(newTag);
 
 									if (oldTag.equals(activeTag))
 									{
@@ -1174,6 +1199,29 @@ public class TabInterface
 		{
 			plugin.openBankTag(activeTag);
 		}
+	}
+
+	/**
+	 * Rebuilds the tab strip and the active tab after tag data changed outside the UI (remote sync).
+	 * Must be called on the client thread; does nothing while the bank is closed.
+	 */
+	public void refreshTabs()
+	{
+		if (!enabled || parent == null)
+		{
+			return;
+		}
+
+		if (activeTag != null && tabManager.find(activeTag) == null)
+		{
+			// the open tab no longer exists
+			closeTag(true);
+		}
+
+		repositionButtons();
+		rebuildTabs();
+		rebuildTagTabTab();
+		reloadActiveTab();
 	}
 
 	private void repositionButtons()

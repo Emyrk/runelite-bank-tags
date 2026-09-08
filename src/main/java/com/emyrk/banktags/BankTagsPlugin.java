@@ -32,6 +32,7 @@ import com.google.inject.Binder;
 import com.google.inject.Provides;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
@@ -63,9 +64,11 @@ import net.runelite.client.game.chatbox.ChatboxPanelManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.bank.BankSearch;
+import com.emyrk.banktags.sync.BankTagSyncCoordinator;
 import com.emyrk.banktags.tabs.Layout;
 import com.emyrk.banktags.tabs.LayoutManager;
 import com.emyrk.banktags.tabs.TabInterface;
+import com.emyrk.banktags.tabs.TabManager;
 import static com.emyrk.banktags.tabs.TabInterface.FILTERED_CHARS;
 import com.emyrk.banktags.tabs.TabSprites;
 import net.runelite.client.util.Text;
@@ -149,6 +152,12 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 	private BankTagsConfig config;
 
 	@Inject
+	private TabManager tabManager;
+
+	@Inject
+	private BankTagSyncCoordinator syncCoordinator;
+
+	@Inject
 	@Named("developerMode")
 	boolean developerMode;
 
@@ -217,11 +226,13 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 		eventBus.register(tabInterface);
 		layoutManager.register();
 		clientThread.invokeLater(this::reinitBank);
+		syncCoordinator.start();
 	}
 
 	@Override
 	public void shutDown()
 	{
+		syncCoordinator.stop();
 		eventBus.unregister(tabInterface);
 		layoutManager.unregister();
 		clientThread.invokeLater(() ->
@@ -234,7 +245,7 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 		spriteManager.removeSpriteOverrides(TabSprites.values());
 	}
 
-	private void reinitBank()
+	public void reinitBank()
 	{
 		// call [clientscript,bankmain_init]
 		Widget w = client.getWidget(InterfaceID.Bankmain.UNIVERSE);
@@ -504,9 +515,19 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 						return s.substring(0, s.length() - VAR_TAG_SUFFIX.length());
 					}).collect(Collectors.toList());
 
+					// Every tag that had or now has this item is affected by the edit
+					final Set<String> affected = new LinkedHashSet<>(tagManager.getTags(itemId, false));
+					affected.addAll(tagManager.getTags(itemId, true));
+					affected.addAll(newTags);
+					affected.addAll(newVarTags);
+
 					// And save them
 					tagManager.setTagString(itemId, Text.toCSV(newTags), false);
 					tagManager.setTagString(itemId, Text.toCSV(newVarTags), true);
+					for (String tag : affected)
+					{
+						syncCoordinator.onTagMutated(tag);
+					}
 
 					// If a tab if active, rebuild the bank to apply the changes
 					tabInterface.reloadActiveTab();
@@ -520,6 +541,20 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 		if (configChanged.getGroup().equals(CONFIG_GROUP) && configChanged.getKey().equals("useTabs"))
 		{
 			clientThread.invokeLater(this::reinitBank);
+		}
+		else if (configChanged.getGroup().equals(BankTagsStorage.SYNC_SETTINGS_GROUP))
+		{
+			syncCoordinator.stop();
+			syncCoordinator.start();
+			if ("enabled".equals(configChanged.getKey()))
+			{
+				// BankTagsStorage.getActiveGroup() switches repositories the moment the flag flips
+				clientThread.invokeLater(() ->
+				{
+					tabManager.reload();
+					reinitBank();
+				});
+			}
 		}
 	}
 

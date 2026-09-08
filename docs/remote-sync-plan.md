@@ -278,6 +278,8 @@ Acceptance: server tests pass and API fixtures match the plugin fixtures byte-fo
 
 ### Milestone 3: RuneLite HTTP sync
 
+**Status: done (3a client in #13, 3b coordinator in issue #5) except the conflict recovery UI, status display, backoff, and reset action, which are Milestone 3c (issue #6).** Conflicts are recorded in `syncConflict_<tagId>` but not yet surfaced. The tests below live in `BankTagSyncClientTest`, `BankTagSyncCoordinatorTest`, and `BankTagsPluginTest`.
+
 #### Red
 
 Add plugin tests with MockWebServer for:
