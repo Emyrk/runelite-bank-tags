@@ -1,0 +1,154 @@
+name: release
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      gradle_version: ${{ steps.compute.outputs.gradle_version }}
+      do_release: ${{ steps.compute.outputs.do_release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Test release-version script
+        run: bash scripts/release-version-test.sh
+
+      - name: Compute version for this build
+        id: compute
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            gradle_version="0.0.0-pr${{ github.event.pull_request.number }}"
+            do_release=false
+
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            # Manual tag push: build with exactly that tag, no bump.
+            release_tag="${GITHUB_REF_NAME}"
+            gradle_version="${release_tag#v}"
+            do_release=true
+
+          else
+            # Push to main: bump off the highest existing vX.Y.Z tag.
+            # This is a snapshot for baking artifact versions only — the
+            # release job re-reads the tag list right before it actually
+            # creates the tag, so a concurrent merge can't collide with it.
+            #
+            # Markers are matched against the commit SUBJECT only (the PR
+            # title of a squash merge) — never the body, which carries the
+            # whole PR description. All marker/version logic lives in the
+            # shared script so this job and the release job cannot drift.
+            subject="$(git log -1 --pretty=%s "${GITHUB_SHA}")"
+            latest="$(git tag --list 'v*' --sort=-v:refname | head -n1)"
+            out="$(printf '%s\n' "$subject" | bash scripts/release-version.sh "$latest")"
+            do_release="$(awk -F= '$1 == "do_release" { print $2 }' <<<"$out")"
+            release_tag="$(awk -F= '$1 == "tag" { print $2 }' <<<"$out")"
+            echo "Next version (subject to re-check before tagging): ${release_tag}"
+
+            if [ "$do_release" = "true" ]; then
+              gradle_version="${release_tag#v}"
+            else
+              gradle_version="0.0.0-dev"
+            fi
+          fi
+
+          echo "gradle_version=${gradle_version}" >> "$GITHUB_OUTPUT"
+          echo "do_release=${do_release}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # build.gradle pins a Java 11 toolchain, so this only pre-installs the
+      # JDK the toolchain resolver would otherwise download.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Test and build plugin jar
+        run: ./gradlew --no-daemon "-Pversion=${{ needs.version.outputs.gradle_version }}" test shadowJar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bank-tags-jar
+          path: build/libs/*-all.jar
+
+  release:
+    needs: [build, version]
+    # Runs for a manually pushed vX.Y.Z tag (published as-is, no bump) or a
+    # push to main that the version job decided should be released (the
+    # opt-out marker lives in scripts/release-version.sh). Everything happens
+    # in this one run: tags created here
+    # with GITHUB_TOKEN do NOT trigger a new workflow run (GitHub's recursion
+    # guard suppresses events from the default token), so we must tag AND
+    # publish the release in this same job rather than relying on the
+    # `tags: v*` trigger to pick it up.
+    if: |
+      needs.version.outputs.do_release == 'true' &&
+      (startsWith(github.ref, 'refs/tags/v') || (github.ref == 'refs/heads/main' && github.event_name == 'push'))
+    concurrency:
+      group: release-main
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Determine and create release tag
+        id: tag
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF_NAME}"
+            echo "Manual tag push, releasing ${tag} as-is."
+          else
+            # Re-read the tag list right now, immediately before tagging —
+            # not the snapshot the `version` job took at job start — so
+            # that if another push to main was released while this job was
+            # queued (see the `concurrency` block above), we bump from the
+            # tag it just created instead of colliding with it.
+            git fetch --tags --force
+            latest="$(git tag --list 'v*' --sort=-v:refname | head -n1)"
+            subject="$(git log -1 --pretty=%s "${GITHUB_SHA}")"
+            tag="$(printf '%s\n' "$subject" | bash scripts/release-version.sh "$latest" \
+              | awk -F= '$1 == "tag" { print $2 }')"
+
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "$tag" -m "Release ${tag}"
+            git push origin "$tag"
+            echo "Tagged and pushed ${tag}."
+          fi
+
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: bank-tags-jar
+          path: dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          files: dist/*.jar
+          generate_release_notes: true
