@@ -25,31 +25,39 @@ public final class FakeScheduler extends AbstractExecutorService implements Sche
 	/**
 	 * Advances the virtual clock by {@code seconds} and runs every task due by then, in due order.
 	 */
-	public synchronized void runDue(long seconds)
+	public void runDue(long seconds)
 	{
-		nowSeconds += seconds;
+		synchronized (this)
+		{
+			nowSeconds += seconds;
+		}
 		while (true)
 		{
 			Task next = null;
-			for (Task task : tasks)
+			// the monitor is released while a task runs: a task may hop to the (test) client thread, and a
+			// callback already on it may be scheduling, so holding both would invert the lock order
+			synchronized (this)
 			{
-				if (!task.cancelled && task.dueSeconds <= nowSeconds && (next == null || task.dueSeconds < next.dueSeconds))
+				for (Task task : tasks)
 				{
-					next = task;
+					if (!task.cancelled && task.dueSeconds <= nowSeconds && (next == null || task.dueSeconds < next.dueSeconds))
+					{
+						next = task;
+					}
 				}
-			}
-			if (next == null)
-			{
-				return;
-			}
-			if (next.periodSeconds > 0)
-			{
-				next.dueSeconds = nowSeconds + next.periodSeconds;
-			}
-			else
-			{
-				tasks.remove(next);
-				next.done = true;
+				if (next == null)
+				{
+					return;
+				}
+				if (next.periodSeconds > 0)
+				{
+					next.dueSeconds = nowSeconds + next.periodSeconds;
+				}
+				else
+				{
+					tasks.remove(next);
+					next.done = true;
+				}
 			}
 			next.command.run();
 		}
@@ -71,6 +79,22 @@ public final class FakeScheduler extends AbstractExecutorService implements Sche
 	public synchronized long now()
 	{
 		return nowSeconds;
+	}
+
+	/**
+	 * Seconds from the virtual now until the earliest pending task, or {@code -1} when nothing is pending.
+	 */
+	public synchronized long nextDelaySeconds()
+	{
+		long best = -1;
+		for (Task task : tasks)
+		{
+			if (!task.cancelled && (best < 0 || task.dueSeconds - nowSeconds < best))
+			{
+				best = task.dueSeconds - nowSeconds;
+			}
+		}
+		return best;
 	}
 
 	@Override

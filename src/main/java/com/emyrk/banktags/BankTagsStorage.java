@@ -51,6 +51,23 @@ public class BankTagsStorage
 		configManager.setConfiguration(SYNC_DATA_GROUP, SYNC_STORAGE_INITIALIZED_KEY, "true");
 	}
 
+	/**
+	 * Deletes every key of {@link #SYNC_DATA_GROUP}: tag data, {@code sync}-prefixed metadata, and the
+	 * {@link #SYNC_STORAGE_INITIALIZED_KEY} marker. {@code emyrk-bank-tags} and {@code banktags} are
+	 * never touched. The next {@code BankTagSyncCoordinator.start()} runs the first-enable path again.
+	 */
+	public void resetSyncStorage()
+	{
+		for (String fullKey : configManager.getConfigurationKeys(SYNC_DATA_GROUP + "."))
+		{
+			String[] keyParts = fullKey.split("\\.", 2);
+			if (keyParts.length == 2 && SYNC_DATA_GROUP.equals(keyParts[0]))
+			{
+				configManager.unsetConfiguration(SYNC_DATA_GROUP, keyParts[1]);
+			}
+		}
+	}
+
 	private static boolean isSharedDataKey(String key)
 	{
 		return key.equals(BankTagsPlugin.TAG_TABS_CONFIG)

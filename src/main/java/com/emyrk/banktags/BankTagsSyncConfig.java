@@ -77,4 +77,19 @@ public interface BankTagsSyncConfig extends Config
 	{
 		return 1;
 	}
+
+	/**
+	 * A self-resetting action: the plugin clears the flag as soon as it sees {@code true}.
+	 */
+	@ConfigItem(
+		keyName = "resetSyncCache",
+		name = "Reset synchronized cache",
+		description = "Deletes the local copy of synchronized tags and reloads them from the server. Your pre-sync local tags are not touched. Tick to run once.",
+		warning = "This deletes the local synchronized cache. Unsynced local changes to synchronized tags are lost.",
+		position = 7
+	)
+	default boolean resetSyncCache()
+	{
+		return false;
+	}
 }

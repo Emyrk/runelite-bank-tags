@@ -5,6 +5,8 @@ import com.emyrk.banktags.BankTagsStorage;
 import com.emyrk.banktags.BankTagsSyncConfig;
 import com.emyrk.banktags.sync.BankTagSyncMetadata.Conflict;
 import com.emyrk.banktags.sync.BankTagSyncMetadata.TagMeta;
+import com.emyrk.banktags.sync.BankTagSyncStatus.GlobalState;
+import com.emyrk.banktags.sync.BankTagSyncStatus.TagState;
 import com.emyrk.banktags.sync.model.BankTagManifest;
 import com.emyrk.banktags.sync.model.ManifestResult;
 import com.emyrk.banktags.sync.model.SharedBankTag;
@@ -33,10 +35,7 @@ import javax.inject.Inject;
 import javax.inject.Provider;
 import javax.inject.Singleton;
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.ChatMessageType;
 import net.runelite.client.callback.ClientThread;
-import net.runelite.client.chat.ChatMessageManager;
-import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.util.Text;
 
 /**
@@ -54,11 +53,22 @@ import net.runelite.client.util.Text;
  * ignored (generation counter), so a stop/start cycle cannot be corrupted by in-flight replies.</li>
  * <li>Nothing blocks: no {@code Future.get()}, no synchronous HTTP.</li>
  * </ul>
+ * <p>
+ * Observable state ({@link GlobalState}, {@link TagState}) is derived from metadata and the
+ * in-memory bookkeeping; every global transition goes through {@link #setGlobalState(GlobalState)},
+ * which is the only place that emits connection chat messages.
  */
 @Slf4j
 @Singleton
 public class BankTagSyncCoordinator
 {
+	/** Upper bound of the exponential poll backoff. */
+	static final long MAX_BACKOFF_SECONDS = 300;
+
+	static final String MSG_INVALID_CREDENTIALS = "Bank tag sync: invalid group name or token. Check the Bank Tags Extended settings.";
+	static final String MSG_OFFLINE = "Bank tag sync: server unreachable, retrying in the background. Your tags still work.";
+	static final String MSG_RECONNECTED = "Bank tag sync: reconnected.";
+
 	private final BankTagSyncClient client;
 	private final BankTagSyncMetadata metadata;
 	private final BankTagSnapshotService snapshots;
@@ -70,9 +80,8 @@ public class BankTagSyncCoordinator
 	private final BankTagsPlugin plugin;
 	private final ScheduledExecutorService executor;
 	private final ClientThread clientThread;
-	private final ChatMessageManager chatMessageManager;
 
-	/** {@link #start()} accepted the configuration; cleared by {@link #stop()} or a failed first enable. */
+	/** {@link #start()} accepted the configuration; cleared by {@link #stop()}. */
 	private volatile boolean started;
 	/** The synchronized namespace is initialized: mutations are tracked and polling runs. */
 	private volatile boolean active;
@@ -81,8 +90,15 @@ public class BankTagSyncCoordinator
 	/** Client thread only. */
 	private boolean applyingRemote;
 
+	private volatile GlobalState globalState = GlobalState.DISABLED;
+	/** Consecutive failed polls (or first-enable attempts); drives the backoff delay. */
+	private int consecutiveFailures;
+	/** Tags whose last upload the server refused with a non-retryable error. */
+	private final Set<String> rejectedTagIds = ConcurrentHashMap.newKeySet();
+
 	private final AtomicBoolean pollInFlight = new AtomicBoolean();
-	private ScheduledFuture<?> pollFuture;
+	/** The next scheduled probe: a poll, or a first-enable retry while backing off. */
+	private volatile ScheduledFuture<?> pollFuture;
 	private ScheduledFuture<?> orderFuture;
 	private final Map<String, ScheduledFuture<?>> debounceFutures = new ConcurrentHashMap<>();
 	private final Map<String, ScheduledFuture<?>> deleteFutures = new ConcurrentHashMap<>();
@@ -95,7 +111,7 @@ public class BankTagSyncCoordinator
 	public BankTagSyncCoordinator(BankTagSyncClient client, BankTagSyncMetadata metadata,
 		BankTagSnapshotService snapshots, BankTagsStorage storage, BankTagsSyncConfig config,
 		TabManager tabManager, Provider<TabInterface> tabInterface, BankTagsPlugin plugin,
-		ScheduledExecutorService executor, ClientThread clientThread, ChatMessageManager chatMessageManager)
+		ScheduledExecutorService executor, ClientThread clientThread)
 	{
 		this.client = client;
 		this.metadata = metadata;
@@ -107,7 +123,6 @@ public class BankTagSyncCoordinator
 		this.plugin = plugin;
 		this.executor = executor;
 		this.clientThread = clientThread;
-		this.chatMessageManager = chatMessageManager;
 	}
 
 	// ---------------------------------------------------------------- lifecycle
@@ -123,9 +138,12 @@ public class BankTagSyncCoordinator
 		}
 		if (!config.enabled() || isBlank(config.groupName()) || isBlank(config.groupToken()))
 		{
+			setGlobalState(GlobalState.DISABLED);
 			return;
 		}
 		started = true;
+		consecutiveFailures = 0;
+		setGlobalState(GlobalState.INITIALIZING);
 
 		if (storage.isSyncStorageActive())
 		{
@@ -144,16 +162,24 @@ public class BankTagSyncCoordinator
 		started = false;
 		active = false;
 
-		if (pollFuture != null)
-		{
-			pollFuture.cancel(false);
-			pollFuture = null;
-		}
-		if (orderFuture != null)
-		{
-			orderFuture.cancel(false);
-			orderFuture = null;
-		}
+		cancelScheduledWork();
+		uploadsInFlight.clear();
+		deletesInFlight.clear();
+		rejectedTagIds.clear();
+		orderInFlight = false;
+		orderPending = false;
+		pollInFlight.set(false);
+		consecutiveFailures = 0;
+		client.cancelAll();
+		setGlobalState(GlobalState.DISABLED);
+	}
+
+	private void cancelScheduledWork()
+	{
+		cancel(pollFuture);
+		pollFuture = null;
+		cancel(orderFuture);
+		orderFuture = null;
 		for (ScheduledFuture<?> future : debounceFutures.values())
 		{
 			future.cancel(false);
@@ -164,12 +190,6 @@ public class BankTagSyncCoordinator
 			future.cancel(false);
 		}
 		deleteFutures.clear();
-		uploadsInFlight.clear();
-		deletesInFlight.clear();
-		orderInFlight = false;
-		orderPending = false;
-		pollInFlight.set(false);
-		client.cancelAll();
 	}
 
 	public boolean isApplyingRemote()
@@ -188,15 +208,172 @@ public class BankTagSyncCoordinator
 	private void activate()
 	{
 		active = true;
-		pollFuture = executor.scheduleWithFixedDelay(this::poll, 0, config.pollIntervalSeconds(), TimeUnit.SECONDS);
+		schedulePoll(0);
+	}
+
+	// ---------------------------------------------------------------- status
+
+	public GlobalState globalState()
+	{
+		return globalState;
+	}
+
+	/**
+	 * Client thread. Derives the state of one tab from metadata and the in-memory bookkeeping.
+	 */
+	public TagState tagState(String tag)
+	{
+		if (!active || tag == null)
+		{
+			return TagState.LOCAL_ONLY;
+		}
+		String name = Text.standardize(tag);
+		String id = metadata.tagIdForName(name);
+		if (conflictIdForName(name, id) != null)
+		{
+			return TagState.CONFLICTED;
+		}
+		if (id == null)
+		{
+			return TagState.LOCAL_ONLY;
+		}
+		if (rejectedTagIds.contains(id))
+		{
+			return TagState.REJECTED;
+		}
+		TagMeta meta = metadata.tag(id);
+		if (debounceFutures.containsKey(id) || uploadsInFlight.contains(id) || (meta != null && isDirty(meta)))
+		{
+			return TagState.PENDING;
+		}
+		return TagState.SYNCED;
+	}
+
+	/**
+	 * The id of the conflict record that concerns the tab called {@code name}: the tab's own id, or a
+	 * remote tag of the same name that is waiting behind a {@code duplicate_name} conflict.
+	 */
+	private String conflictIdForName(String name, String localId)
+	{
+		if (localId != null && metadata.conflict(localId) != null)
+		{
+			return localId;
+		}
+		for (Map.Entry<String, Conflict> entry : metadata.allConflicts().entrySet())
+		{
+			if (name.equals(entry.getValue().remote.getName()))
+			{
+				return entry.getKey();
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * The single transition point for {@link GlobalState}: emits the connection chat messages once per
+	 * transition and refreshes the tab menu when the {@code OFFLINE} retry entry may have changed.
+	 */
+	private void setGlobalState(GlobalState next)
+	{
+		GlobalState previous = globalState;
+		if (previous == next)
+		{
+			return;
+		}
+		log.debug("bank tag sync state {} -> {}", previous, next);
+		// message first, state second: an observer that sees the new state can rely on the message being queued
+		switch (next)
+		{
+			case INVALID_CREDENTIALS:
+				chat(MSG_INVALID_CREDENTIALS);
+				break;
+			case OFFLINE:
+				chat(MSG_OFFLINE);
+				break;
+			case ONLINE:
+				if (previous == GlobalState.OFFLINE)
+				{
+					chat(MSG_RECONNECTED);
+				}
+				break;
+			default:
+				break;
+		}
+		globalState = next;
+		if (previous == GlobalState.OFFLINE || next == GlobalState.OFFLINE)
+		{
+			refreshTabs();
+		}
+	}
+
+	/**
+	 * Any request completed: the connection is healthy and the backoff is reset.
+	 */
+	private void onRequestSucceeded()
+	{
+		consecutiveFailures = 0;
+		setGlobalState(GlobalState.ONLINE);
+	}
+
+	/**
+	 * Applies the connection-level consequences of a failure. Returns {@code true} when the failure
+	 * was a credentials or transport problem (the caller keeps the tag dirty), {@code false} when the
+	 * failure is specific to the request.
+	 */
+	private boolean handleConnectionFailure(SyncFailure failure)
+	{
+		switch (failure.getKind())
+		{
+			case UNAUTHORIZED:
+				onUnauthorized();
+				return true;
+			case NETWORK:
+			case SERVER_ERROR:
+				setGlobalState(GlobalState.OFFLINE);
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	/**
+	 * {@code 401}: stop every timer and send nothing more. {@link #stop()} followed by {@link #start()}
+	 * (the settings change path) is the only way back.
+	 */
+	private void onUnauthorized()
+	{
+		cancelScheduledWork();
+		setGlobalState(GlobalState.INVALID_CREDENTIALS);
+	}
+
+	/**
+	 * Delay before the next probe after a transport failure: {@code interval * 2^failures}, capped.
+	 */
+	private long nextBackoffSeconds()
+	{
+		long interval = Math.max(1, config.pollIntervalSeconds());
+		long delay = interval << Math.min(consecutiveFailures, 16);
+		consecutiveFailures++;
+		return Math.min(delay, MAX_BACKOFF_SECONDS);
+	}
+
+	private boolean sendingSuspended()
+	{
+		GlobalState state = globalState;
+		return state == GlobalState.OFFLINE || state == GlobalState.INVALID_CREDENTIALS;
 	}
 
 	// ---------------------------------------------------------------- first enable
 
 	private void firstEnable(int gen)
 	{
+		if (!started || gen != epoch.get())
+		{
+			return;
+		}
 		client.getManifest(null, onClientThread(gen, result ->
 		{
+			onRequestSucceeded();
 			BankTagManifest manifest = result.getManifest();
 			List<BankTagManifest.Entry> live = new ArrayList<>();
 			if (manifest != null)
@@ -219,24 +396,32 @@ public class BankTagSyncCoordinator
 			{
 				ids.add(entry.getTagId());
 			}
-			fetchAll(gen, ids, fetched -> seedFromRemote(manifest, fetched), () ->
-			{
-				started = false;
-				chat("Bank tag sync: failed to load your group's tags. Sync is off until the settings change.");
-			});
-		}, failure ->
+			fetchAll(gen, ids, fetched -> seedFromRemote(manifest, fetched), failure -> onFirstEnableFailed(gen, failure));
+		}, failure -> onFirstEnableFailed(gen, failure)));
+	}
+
+	private void onFirstEnableFailed(int gen, SyncFailure failure)
+	{
+		log.debug("bank tag sync first enable failed: {}", failure.getKind());
+		switch (failure.getKind())
 		{
-			started = false;
-			log.debug("bank tag sync first enable failed: {}", failure.getKind());
-			if (failure.getKind() == SyncFailure.Kind.UNAUTHORIZED)
+			case UNAUTHORIZED:
+				onUnauthorized();
+				break;
+			case NETWORK:
+			case SERVER_ERROR:
 			{
-				chat("Bank tag sync: invalid group name or token.");
+				long delay = nextBackoffSeconds();
+				setGlobalState(GlobalState.OFFLINE);
+				scheduleProbe(() -> clientThread.invoke(() -> firstEnable(gen)), delay);
+				break;
 			}
-			else
-			{
-				chat("Bank tag sync: could not reach the server. Sync is off until the settings change.");
-			}
-		}));
+			default:
+				started = false;
+				setGlobalState(GlobalState.DISABLED);
+				chat("Bank tag sync: the server sent an unexpected response. Sync is off until the settings change.");
+				break;
+		}
 	}
 
 	/**
@@ -305,6 +490,28 @@ public class BankTagSyncCoordinator
 
 	// ---------------------------------------------------------------- polling
 
+	/**
+	 * Replaces the next probe with a poll {@code delaySeconds} from now.
+	 */
+	private void schedulePoll(long delaySeconds)
+	{
+		if (!active)
+		{
+			return;
+		}
+		scheduleProbe(this::poll, delaySeconds);
+	}
+
+	private void scheduleProbe(Runnable probe, long delaySeconds)
+	{
+		if (!started || globalState == GlobalState.INVALID_CREDENTIALS)
+		{
+			return;
+		}
+		cancel(pollFuture);
+		pollFuture = executor.schedule(probe, delaySeconds, TimeUnit.SECONDS);
+	}
+
 	private void poll()
 	{
 		if (!active)
@@ -313,12 +520,14 @@ public class BankTagSyncCoordinator
 		}
 		if (pollInFlight.getAndSet(true))
 		{
+			schedulePoll(config.pollIntervalSeconds());
 			return;
 		}
 		final int gen = epoch.get();
 		long revision = metadata.groupRevision();
 		client.getManifest(revision == 0 ? null : revision, onClientThread(gen, result ->
 		{
+			onRequestSucceeded();
 			if (result.isNotModified())
 			{
 				finishPoll();
@@ -327,9 +536,35 @@ public class BankTagSyncCoordinator
 			planRemoteChanges(gen, result.getManifest());
 		}, failure ->
 		{
-			log.debug("bank tag sync poll failed: {}", failure.getKind());
 			pollInFlight.set(false);
+			onPollFailed(failure);
 		}));
+	}
+
+	/**
+	 * Client thread. A poll (manifest or one of its fetches) failed: back off, stop on {@code 401},
+	 * or simply try again next interval for a malformed response.
+	 */
+	private void onPollFailed(SyncFailure failure)
+	{
+		log.debug("bank tag sync poll failed: {}", failure.getKind());
+		switch (failure.getKind())
+		{
+			case UNAUTHORIZED:
+				onUnauthorized();
+				break;
+			case NETWORK:
+			case SERVER_ERROR:
+			{
+				long delay = nextBackoffSeconds();
+				setGlobalState(GlobalState.OFFLINE);
+				schedulePoll(delay);
+				break;
+			}
+			default:
+				schedulePoll(config.pollIntervalSeconds());
+				break;
+		}
 	}
 
 	/**
@@ -399,7 +634,11 @@ public class BankTagSyncCoordinator
 		boolean orderChanged = manifest.getOrderRevision() != metadata.orderRevision();
 		fetchAll(gen, toFetch,
 			fetched -> applyRemote(manifest, local, fetched, fetchAsConflict, toDelete, tombstoneConflicts, orderChanged),
-			() -> pollInFlight.set(false));
+			failure ->
+			{
+				pollInFlight.set(false);
+				onPollFailed(failure);
+			});
 	}
 
 	/**
@@ -420,10 +659,11 @@ public class BankTagSyncCoordinator
 			{
 				SharedBankTag tag = fetched.get(id);
 				TagMeta meta = local.get(id);
+				String localName = meta == null ? tag.getName() : meta.name;
 				String reason = fetchAsConflict.get(id);
 				if (reason != null)
 				{
-					metadata.putConflict(id, new Conflict(tag, reason));
+					recordConflict(id, localName, new Conflict(tag, reason));
 					continue;
 				}
 				if (tag.isDeleted())
@@ -439,17 +679,18 @@ public class BankTagSyncCoordinator
 					snapshots.apply(meta == null ? null : meta.name, tag);
 					metadata.putTag(id, new TagMeta(tag.getName(), tag.getRevision(), tag.contentHash()));
 					metadata.removeConflict(id);
+					rejectedTagIds.remove(id);
 					cancelDebounce(id);
 				}
 				catch (IllegalArgumentException ex)
 				{
 					// a local tab already owns this name
-					metadata.putConflict(id, new Conflict(tag, BankTagSyncMetadata.REASON_DUPLICATE_NAME));
+					recordConflict(id, localName, new Conflict(tag, BankTagSyncMetadata.REASON_DUPLICATE_NAME));
 				}
 			}
 			for (Map.Entry<String, Conflict> entry : tombstoneConflicts.entrySet())
 			{
-				metadata.putConflict(entry.getKey(), entry.getValue());
+				recordConflict(entry.getKey(), local.get(entry.getKey()).name, entry.getValue());
 			}
 			if (orderChanged)
 			{
@@ -485,10 +726,12 @@ public class BankTagSyncCoordinator
 		metadata.removeTag(id);
 		metadata.removePendingDelete(id);
 		metadata.removeConflict(id);
+		rejectedTagIds.remove(id);
 	}
 
 	/**
-	 * Client thread. Re-schedules every dirty tag, retries pending deletes, and releases the poll.
+	 * Client thread. Re-schedules every dirty tag, retries pending deletes, releases the poll, and
+	 * arms the next one.
 	 */
 	private void finishPoll()
 	{
@@ -500,6 +743,7 @@ public class BankTagSyncCoordinator
 		finally
 		{
 			pollInFlight.set(false);
+			schedulePoll(config.pollIntervalSeconds());
 		}
 	}
 
@@ -521,7 +765,8 @@ public class BankTagSyncCoordinator
 		for (Map.Entry<String, TagMeta> entry : all.entrySet())
 		{
 			String id = entry.getKey();
-			if (debounceFutures.containsKey(id) || uploadsInFlight.contains(id) || metadata.conflict(id) != null)
+			if (debounceFutures.containsKey(id) || uploadsInFlight.contains(id) || metadata.conflict(id) != null
+				|| rejectedTagIds.contains(id))
 			{
 				continue;
 			}
@@ -560,7 +805,10 @@ public class BankTagSyncCoordinator
 		{
 			return;
 		}
-		scheduleUpload(resolveTagId(name));
+		String id = resolveTagId(name);
+		// a changed tag gets a fresh chance; the rejection concerned its previous content
+		rejectedTagIds.remove(id);
+		scheduleUpload(id);
 	}
 
 	public void onTagRenamed(String oldTag, String newTag)
@@ -593,6 +841,7 @@ public class BankTagSyncCoordinator
 		cancelDebounce(id);
 		metadata.removeTag(id);
 		metadata.removeConflict(id);
+		rejectedTagIds.remove(id);
 		if (meta.revision == 0)
 		{
 			return;
@@ -621,6 +870,151 @@ public class BankTagSyncCoordinator
 		return id;
 	}
 
+	// ---------------------------------------------------------------- recovery actions
+
+	/**
+	 * Client thread. Resolves a conflict by replacing the local tab with the server's copy (or
+	 * deleting it when the server's copy is a tombstone). Applied with local observation suppressed
+	 * so nothing is uploaded back.
+	 */
+	public void useRemoteVersion(String tag)
+	{
+		if (!active || tag == null)
+		{
+			return;
+		}
+		String name = Text.standardize(tag);
+		String localId = metadata.tagIdForName(name);
+		String conflictId = conflictIdForName(name, localId);
+		if (conflictId == null)
+		{
+			return;
+		}
+		SharedBankTag remote = metadata.conflict(conflictId).remote;
+		applyingRemote = true;
+		try
+		{
+			cancelDebounce(conflictId);
+			if (localId != null)
+			{
+				cancelDebounce(localId);
+				if (!localId.equals(conflictId))
+				{
+					metadata.removeTag(localId);
+				}
+			}
+			if (remote.isDeleted())
+			{
+				snapshots.delete(name);
+				metadata.removeTag(conflictId);
+			}
+			else
+			{
+				snapshots.apply(name, remote);
+				metadata.putTag(conflictId, new TagMeta(remote.getName(), remote.getRevision(), remote.contentHash()));
+			}
+			metadata.removeConflict(conflictId);
+			metadata.removePendingDelete(conflictId);
+			rejectedTagIds.remove(conflictId);
+		}
+		finally
+		{
+			applyingRemote = false;
+		}
+		log.debug("bank tag sync conflict resolved with the remote version");
+		tabInterface.get().refreshTabs();
+	}
+
+	/**
+	 * Client thread. Resolves a conflict by sending the local tab over the server's copy, using the
+	 * revision recorded in the conflict. A tombstoned id cannot be re-created, so the tab is
+	 * re-created under a fresh id instead. A further {@code 409} re-records the conflict.
+	 */
+	public void overwriteRemoteVersion(String tag)
+	{
+		if (!active || tag == null)
+		{
+			return;
+		}
+		String name = Text.standardize(tag);
+		String localId = metadata.tagIdForName(name);
+		String conflictId = conflictIdForName(name, localId);
+		if (conflictId == null)
+		{
+			return;
+		}
+		SharedBankTag remote = metadata.conflict(conflictId).remote;
+		SharedBankTag snapshot;
+		try
+		{
+			snapshot = snapshots.snapshot(name);
+		}
+		catch (IllegalArgumentException ex)
+		{
+			return; // the tab no longer exists
+		}
+		final String hash = snapshot.contentHash();
+		final int gen = epoch.get();
+		cancelDebounce(conflictId);
+		if (localId != null && !localId.equals(conflictId))
+		{
+			cancelDebounce(localId);
+			metadata.removeTag(localId);
+		}
+		metadata.removeConflict(conflictId);
+		metadata.removePendingDelete(conflictId);
+		rejectedTagIds.remove(conflictId);
+
+		if (remote.isDeleted())
+		{
+			metadata.removeTag(conflictId);
+			final String newId = UUID.randomUUID().toString();
+			final TagMeta meta = new TagMeta(name, 0, "");
+			metadata.putTag(newId, meta);
+			uploadsInFlight.add(newId);
+			client.createTag(newId, snapshot, onClientThread(gen,
+				result -> onUploadSuccess(newId, hash, result, true),
+				failure -> onUploadFailure(gen, newId, meta, failure)));
+		}
+		else
+		{
+			TagMeta previous = metadata.tag(conflictId);
+			final TagMeta meta = new TagMeta(name, remote.getRevision(), previous == null ? "" : previous.baseHash);
+			metadata.putTag(conflictId, meta);
+			uploadsInFlight.add(conflictId);
+			client.updateTag(conflictId, remote.getRevision(), snapshot, onClientThread(gen,
+				result -> onUploadSuccess(conflictId, hash, result, false),
+				failure -> onUploadFailure(gen, conflictId, meta, failure)));
+		}
+		log.debug("bank tag sync conflict resolved with the local version");
+		tabInterface.get().refreshTabs();
+	}
+
+	/**
+	 * Client thread. Forgets a rejection or a backoff for one tab and sends it now, followed by a poll.
+	 */
+	public void retry(String tag)
+	{
+		if (!active || tag == null)
+		{
+			return;
+		}
+		String id = metadata.tagIdForName(Text.standardize(tag));
+		if (id == null)
+		{
+			return;
+		}
+		boolean wasRejected = rejectedTagIds.remove(id);
+		consecutiveFailures = 0;
+		cancelDebounce(id);
+		upload(id, true);
+		schedulePoll(0);
+		if (wasRejected)
+		{
+			tabInterface.get().refreshTabs();
+		}
+	}
+
 	// ---------------------------------------------------------------- uploads
 
 	private void scheduleUpload(String tagId)
@@ -629,7 +1023,7 @@ public class BankTagSyncCoordinator
 		ScheduledFuture<?> future = executor.schedule(() ->
 		{
 			debounceFutures.remove(tagId, self.get());
-			clientThread.invoke(() -> upload(tagId));
+			clientThread.invoke(() -> upload(tagId, false));
 		}, config.uploadDebounceSeconds(), TimeUnit.SECONDS);
 		self.set(future);
 		cancel(debounceFutures.put(tagId, future));
@@ -641,11 +1035,13 @@ public class BankTagSyncCoordinator
 	}
 
 	/**
-	 * Client thread. Sends the current snapshot of one tag unless there is nothing to send.
+	 * Client thread. Sends the current snapshot of one tag unless there is nothing to send. While the
+	 * server is unreachable or the credentials are rejected nothing is sent; the poll sweep picks the
+	 * tag up again once the connection is back, unless {@code evenIfOffline} forces a probe.
 	 */
-	private void upload(String tagId)
+	private void upload(String tagId, boolean evenIfOffline)
 	{
-		if (!active)
+		if (!active || (sendingSuspended() && !evenIfOffline))
 		{
 			return;
 		}
@@ -688,6 +1084,8 @@ public class BankTagSyncCoordinator
 	private void onUploadSuccess(String tagId, String sentHash, SharedBankTag remote, boolean created)
 	{
 		uploadsInFlight.remove(tagId);
+		onRequestSucceeded();
+		boolean visibleChange = rejectedTagIds.remove(tagId) | metadata.conflict(tagId) != null;
 		TagMeta current = metadata.tag(tagId);
 		if (current == null)
 		{
@@ -706,28 +1104,33 @@ public class BankTagSyncCoordinator
 		{
 			scheduleUpload(tagId);
 		}
+		if (visibleChange)
+		{
+			refreshTabs();
+		}
 	}
 
 	private void onUploadFailure(int gen, String tagId, TagMeta meta, SyncFailure failure)
 	{
 		uploadsInFlight.remove(tagId);
+		if (handleConnectionFailure(failure))
+		{
+			// stays dirty; the next successful poll sweep retries
+			log.debug("bank tag sync upload failed: {}", failure.getKind());
+			return;
+		}
 		switch (failure.getKind())
 		{
 			case CONFLICT:
 				recordWriteConflict(gen, tagId, meta, failure);
 				break;
 			case NOT_FOUND:
-				metadata.putConflict(tagId, new Conflict(tombstone(tagId, meta.name, meta.revision),
+				recordConflict(tagId, meta.name, new Conflict(tombstone(tagId, meta.name, meta.revision),
 					BankTagSyncMetadata.REASON_REMOTE_CHANGED));
-				break;
-			case NETWORK:
-			case SERVER_ERROR:
-			case UNAUTHORIZED:
-				// stays dirty; the next poll sweep retries
-				log.debug("bank tag sync upload failed: {}", failure.getKind());
+				refreshTabs();
 				break;
 			default:
-				log.debug("bank tag sync upload rejected: {}", failure.getKind());
+				recordRejection(tagId, meta.name, failure);
 				break;
 		}
 	}
@@ -750,12 +1153,47 @@ public class BankTagSyncCoordinator
 		SharedBankTag current = failure.getCurrentTag();
 		String remoteId = current == null || isBlank(current.getTagId()) ? tagId : current.getTagId();
 		client.getTag(remoteId, onClientThread(gen,
-			remote -> metadata.putConflict(tagId, new Conflict(remote, reason)),
+			remote ->
+			{
+				recordConflict(tagId, meta.name, new Conflict(remote, reason));
+				refreshTabs();
+			},
 			fetchFailure ->
 			{
 				SharedBankTag fallback = current != null ? current : tombstone(tagId, meta.name, meta.revision);
-				metadata.putConflict(tagId, new Conflict(fallback, reason));
+				recordConflict(tagId, meta.name, new Conflict(fallback, reason));
+				refreshTabs();
 			}));
+	}
+
+	/**
+	 * Client thread. Stores the conflict and announces it once; a tag that is already conflicted
+	 * stays quiet when the record is refreshed.
+	 */
+	private void recordConflict(String tagId, String name, Conflict conflict)
+	{
+		if (metadata.conflict(tagId) == null)
+		{
+			chat("Bank tag sync: '" + name + "' changed on the server and locally. Right-click the tab to resolve.");
+		}
+		metadata.putConflict(tagId, conflict);
+	}
+
+	/**
+	 * Client thread. The server refused the upload for a reason that will not change until the tag
+	 * does ({@code 400}, {@code 413}, {@code 428}, or an unreadable response).
+	 */
+	private void recordRejection(String tagId, String name, SyncFailure failure)
+	{
+		log.debug("bank tag sync upload rejected: {}", failure.getKind());
+		if (rejectedTagIds.contains(tagId))
+		{
+			return;
+		}
+		String code = isBlank(failure.getErrorCode()) ? failure.getKind().name().toLowerCase() : failure.getErrorCode();
+		chat("Bank tag sync: '" + name + "' was rejected by the server (" + code + ").");
+		rejectedTagIds.add(tagId);
+		refreshTabs();
 	}
 
 	// ---------------------------------------------------------------- deletes
@@ -782,10 +1220,16 @@ public class BankTagSyncCoordinator
 		client.deleteTag(tagId, revision, onClientThread(epoch.get(), remote ->
 		{
 			deletesInFlight.remove(tagId);
+			onRequestSucceeded();
 			metadata.removePendingDelete(tagId);
 		}, failure ->
 		{
 			deletesInFlight.remove(tagId);
+			if (handleConnectionFailure(failure))
+			{
+				log.debug("bank tag sync delete failed: {}", failure.getKind());
+				return;
+			}
 			switch (failure.getKind())
 			{
 				case CONFLICT:
@@ -845,11 +1289,13 @@ public class BankTagSyncCoordinator
 					retryFailure ->
 					{
 						orderInFlight = false;
+						handleConnectionFailure(retryFailure);
 						log.debug("bank tag sync order retry rejected: {}", retryFailure.getKind());
 					}));
 				return;
 			}
 			orderInFlight = false;
+			handleConnectionFailure(failure);
 			log.debug("bank tag sync order upload rejected: {}", failure.getKind());
 		}));
 	}
@@ -857,6 +1303,7 @@ public class BankTagSyncCoordinator
 	private void onOrderSuccess(int gen, BankTagManifest manifest)
 	{
 		orderInFlight = false;
+		onRequestSucceeded();
 		metadata.setOrderRevision(manifest.getOrderRevision());
 		if (orderPending)
 		{
@@ -935,10 +1382,10 @@ public class BankTagSyncCoordinator
 
 	/**
 	 * Fetches every id; when all callbacks returned, continues on the client thread with either the
-	 * complete map or the failure handler. Local state is never touched before every fetch succeeded.
+	 * complete map or the first failure. Local state is never touched before every fetch succeeded.
 	 */
 	private void fetchAll(int gen, Collection<String> ids, Consumer<Map<String, SharedBankTag>> onAllFetched,
-		Runnable onFailure)
+		Consumer<SyncFailure> onFailure)
 	{
 		if (ids.isEmpty())
 		{
@@ -947,7 +1394,7 @@ public class BankTagSyncCoordinator
 		}
 		final Map<String, SharedBankTag> fetched = new ConcurrentHashMap<>();
 		final AtomicInteger remaining = new AtomicInteger(ids.size());
-		final AtomicBoolean failed = new AtomicBoolean();
+		final AtomicReference<SyncFailure> failed = new AtomicReference<>();
 		for (String id : ids)
 		{
 			client.getTag(id, new BankTagSyncClient.Callback<SharedBankTag>()
@@ -963,7 +1410,7 @@ public class BankTagSyncCoordinator
 				public void onFailure(SyncFailure failure)
 				{
 					log.debug("bank tag sync fetch failed: {}", failure.getKind());
-					failed.set(true);
+					failed.compareAndSet(null, failure);
 					done();
 				}
 
@@ -979,9 +1426,10 @@ public class BankTagSyncCoordinator
 						{
 							return;
 						}
-						if (failed.get())
+						SyncFailure failure = failed.get();
+						if (failure != null)
 						{
-							onFailure.run();
+							onFailure.accept(failure);
 						}
 						else
 						{
@@ -1061,11 +1509,19 @@ public class BankTagSyncCoordinator
 		return value == null || value.trim().isEmpty();
 	}
 
+	/**
+	 * Rebuilds the tab strip on the client thread so the {@code Sync:} menu entries match the state.
+	 */
+	private void refreshTabs()
+	{
+		clientThread.invoke(() -> tabInterface.get().refreshTabs());
+	}
+
+	/**
+	 * Console message on the client thread. Callers never include the token, the URL, or a payload.
+	 */
 	private void chat(String message)
 	{
-		chatMessageManager.queue(QueuedMessage.builder()
-			.type(ChatMessageType.CONSOLE)
-			.runeLiteFormattedMessage(message)
-			.build());
+		clientThread.invoke(() -> tabInterface.get().sendChatMessage(message));
 	}
 }

@@ -93,6 +93,7 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 	public static final String TAG_LAYOUT_PREFIX = "layout_";
 	static final String ITEM_KEY_PREFIX = "item_";
 	static final String TAG_HIDDEN_PREFIX = "hidden_";
+	static final String RESET_SYNC_CACHE_KEY = "resetSyncCache";
 
 	public static final String TAG_SEARCH = "tag:";
 	private static final String EDIT_TAGS_MENU_OPTION = "Edit-tags";
@@ -156,6 +157,9 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 
 	@Inject
 	private BankTagSyncCoordinator syncCoordinator;
+
+	@Inject
+	private BankTagsStorage storage;
 
 	@Inject
 	@Named("developerMode")
@@ -544,6 +548,15 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 		}
 		else if (configChanged.getGroup().equals(BankTagsStorage.SYNC_SETTINGS_GROUP))
 		{
+			if (RESET_SYNC_CACHE_KEY.equals(configChanged.getKey()))
+			{
+				// a self-resetting action; the write-back below fires this event again with "false"
+				if ("true".equals(configChanged.getNewValue()))
+				{
+					resetSyncCache();
+				}
+				return;
+			}
 			syncCoordinator.stop();
 			syncCoordinator.start();
 			if ("enabled".equals(configChanged.getKey()))
@@ -556,6 +569,23 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 				});
 			}
 		}
+	}
+
+	/**
+	 * Drops the synchronized cache and reloads it from the server through the coordinator's
+	 * first-enable path. The confirmation is the {@code warning} on the config item.
+	 */
+	private void resetSyncCache()
+	{
+		configManager.setConfiguration(BankTagsStorage.SYNC_SETTINGS_GROUP, RESET_SYNC_CACHE_KEY, false);
+		syncCoordinator.stop();
+		storage.resetSyncStorage();
+		clientThread.invokeLater(() ->
+		{
+			tabManager.reload();
+			reinitBank();
+			syncCoordinator.start();
+		});
 	}
 
 	public void openTag(String tag, Layout layout)

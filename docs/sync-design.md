@@ -202,7 +202,10 @@ All decided on September 8, 2026 (issue #3). The normative protocol is `docs/rem
 
 Coordinator decisions made while implementing Milestone 3b (issue #5):
 
-- Conflicts are recorded in `syncConflict_<tagId>` and the tag stops uploading until the conflict is cleared; surfacing and recovery actions are Milestone 3c. Local data is never modified by a conflict.
+- Conflicts are recorded in `syncConflict_<tagId>` and the tag stops uploading until the conflict is cleared. Local data is never modified by a conflict. The tab's right-click menu offers `Sync: use server version` and `Sync: overwrite server version` (the latter behind a chatbox confirmation) while the tag is conflicted; a conflict is announced once in the chat when it appears.
+- A tombstoned tag id is never resurrected: `overwrite server version` on a tombstone mints a fresh `tagId` and creates the tag under it.
+- `400`/`413`/`428` and unreadable upload responses mark the tag rejected in memory; it is skipped by the poll sweep until `Sync: retry` or a further local change. A `401` from any call stops all timers (`invalid credentials`) until the settings change; transport failures back off exponentially (`pollIntervalSeconds × 2^n`, capped at 300 s) and suspend uploads until the next successful poll.
+- `Reset synchronized cache` (config action) clears every `emyrk-bank-tags-sync.*` key and re-runs first enable; it never touches `emyrk-bank-tags` or `banktags`.
 - A remote tag whose id is unknown locally but whose name matches a local tab that was never uploaded (`revision 0` or no metadata) is recorded as a `duplicate_name` conflict instead of being merged into the local tab.
 - A manifest entry for an id with a local `syncPendingDelete_` record is ignored until the delete is acknowledged or rejected, so a tab being deleted is not re-created by a concurrent poll.
 - After a successful create the coordinator schedules an order upload, because the server appends new ids to the group order and the local position may differ. While an order upload is pending or in flight, a remote order change seen by a poll is not applied locally (the pending upload wins; its `orderRevision` is still updated so the upload carries the current precondition).

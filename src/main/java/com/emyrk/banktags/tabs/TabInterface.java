@@ -89,6 +89,7 @@ import static com.emyrk.banktags.BankTagsPlugin.TAG_SEARCH;
 import static com.emyrk.banktags.BankTagsPlugin.VAR_TAG_SUFFIX;
 import com.emyrk.banktags.BankTagsService;
 import com.emyrk.banktags.sync.BankTagSyncCoordinator;
+import com.emyrk.banktags.sync.BankTagSyncStatus;
 import com.emyrk.banktags.TagManager;
 import net.runelite.client.ui.JagexColors;
 import net.runelite.client.util.ColorUtil;
@@ -119,6 +120,9 @@ public class TabInterface
 	static final String DISABLE_LAYOUT = "Disable layout";
 	static final String REMOVE_LAYOUT = "Remove-layout";
 	static final String DUPLICATE_ITEM = "Duplicate-item";
+	static final String SYNC_USE_REMOTE = "Sync: use server version";
+	static final String SYNC_OVERWRITE_REMOTE = "Sync: overwrite server version";
+	static final String SYNC_RETRY = "Sync: retry";
 	private static final int TAB_HEIGHT = 40;
 	private static final int TAB_WIDTH = 39;
 	private static final int BUTTON_HEIGHT = 20;
@@ -138,6 +142,9 @@ public class TabInterface
 	private static final int TAB_OP_EXPORT_TAB = 4;
 	private static final int TAB_OP_RENAME_TAB = 5;
 	private static final int TAB_OP_DELETE_TAB = 6;
+	private static final int TAB_OP_SYNC_USE_REMOTE = 7;
+	private static final int TAB_OP_SYNC_OVERWRITE_REMOTE = 8;
+	private static final int TAB_OP_SYNC_RETRY = 9;
 	private static final int NEWTAB_OP_NEW_TAB = 1;
 	private static final int NEWTAB_OP_IMPORT_TAB = 2;
 	private static final int NEWTAB_OP_OPEN_TAB_MENU = 3;
@@ -751,6 +758,27 @@ public class TabInterface
 				String renameTarget = Text.standardize(event.getOpbase());
 				renameTab(renameTarget);
 				break;
+			case TAB_OP_SYNC_USE_REMOTE:
+			{
+				final String syncTarget = Text.standardize(event.getOpbase());
+				syncCoordinator.useRemoteVersion(syncTarget);
+				break;
+			}
+			case TAB_OP_SYNC_OVERWRITE_REMOTE:
+			{
+				final String syncTarget = Text.standardize(event.getOpbase());
+				chatboxPanelManager.openTextMenuInput("Overwrite the server's copy of '" + syncTarget + "'?")
+					.option("1. Yes, overwrite", () -> clientThread.invoke(() -> syncCoordinator.overwriteRemoteVersion(syncTarget)))
+					.option("2. Cancel", Runnables.doNothing())
+					.build();
+				break;
+			}
+			case TAB_OP_SYNC_RETRY:
+			{
+				final String syncTarget = Text.standardize(event.getOpbase());
+				syncCoordinator.retry(syncTarget);
+				break;
+			}
 		}
 	}
 
@@ -1021,8 +1049,27 @@ public class TabInterface
 		w.setAction(TAB_OP_EXPORT_TAB, EXPORT_TAB);
 		w.setAction(TAB_OP_RENAME_TAB, RENAME_TAB);
 		w.setAction(TAB_OP_DELETE_TAB, REMOVE_TAB);
+		addSyncActions(tab, w);
 		w.setHasListener(true);
 		w.setOnOpListener((JavaScriptCallback) this::opTagTab);
+	}
+
+	/**
+	 * Recovery entries derived from the sync state. Every slot is always written (possibly to
+	 * {@code null}) so a rebuilt widget never keeps a stale entry.
+	 */
+	private void addSyncActions(TagTab tab, Widget w)
+	{
+		BankTagSyncStatus.TagState state = TAGTABS.equals(tab.getTag())
+			? BankTagSyncStatus.TagState.LOCAL_ONLY
+			: syncCoordinator.tagState(tab.getTag());
+		boolean conflicted = state == BankTagSyncStatus.TagState.CONFLICTED;
+		boolean retry = state == BankTagSyncStatus.TagState.REJECTED
+			|| (state == BankTagSyncStatus.TagState.PENDING
+			&& syncCoordinator.globalState() == BankTagSyncStatus.GlobalState.OFFLINE);
+		w.setAction(TAB_OP_SYNC_USE_REMOTE, conflicted ? SYNC_USE_REMOTE : null);
+		w.setAction(TAB_OP_SYNC_OVERWRITE_REMOTE, conflicted ? SYNC_OVERWRITE_REMOTE : null);
+		w.setAction(TAB_OP_SYNC_RETRY, retry ? SYNC_RETRY : null);
 	}
 
 	private void addTabOptions(Widget w)
@@ -1445,7 +1492,10 @@ public class TabInterface
 			.setIdentifier(event.getIdentifier());
 	}
 
-	private void sendChatMessage(final String message)
+	/**
+	 * Queues a console message. Also used by the sync coordinator (through {@code ClientThread.invoke}).
+	 */
+	public void sendChatMessage(final String message)
 	{
 		chatMessageManager.queue(QueuedMessage.builder()
 			.type(ChatMessageType.CONSOLE)
