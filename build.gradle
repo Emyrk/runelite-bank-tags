@@ -30,17 +30,49 @@ dependencies {
 }
 
 group = 'com.emyrk.banktags'
+// CI passes -Pversion=<gradle_version> (see .github/workflows/release.yml);
+// local builds fall back to 0.0.0-dev.
+version = project.hasProperty('version') && project.version != 'unspecified' ? project.version : '0.0.0-dev'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(11)
+	}
+}
 
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
-	options.release.set(11)
+}
+
+processResources {
+	// runelite-plugin.properties lives at the repo root (Plugin Hub
+	// convention); bake the build version into the copy shipped in the jar.
+	from('runelite-plugin.properties')
+	inputs.property('version', project.version)
+	filesMatching('runelite-plugin.properties') {
+		expand(version: project.version)
+	}
 }
 
 tasks.register('run', JavaExec) {
 	classpath = sourceSets.test.runtimeClasspath
 	mainClass = pluginMainClass
 
-	jvmArgs "-ea"
+	// Same opens the official launcher passes the client; without them the
+	// client dies on macOS with IllegalAccessError on
+	// com.apple.eawt.FullScreenAdapter. Unknown packages are a no-op
+	// elsewhere, so they're passed unconditionally.
+	jvmArgs "-ea",
+		"--add-opens", "java.base/java.net=ALL-UNNAMED",
+		"--add-opens", "java.base/java.io=ALL-UNNAMED",
+		"--add-opens", "java.desktop/com.apple.eawt=ALL-UNNAMED",
+		"--add-opens", "java.base/java.lang=ALL-UNNAMED",
+		"--add-opens", "java.base/java.lang.invoke=ALL-UNNAMED",
+		"--add-opens", "java.desktop/sun.awt=ALL-UNNAMED",
+		"--add-opens", "java.desktop/java.applet=ALL-UNNAMED",
+		"--add-opens", "java.desktop/java.awt.event=ALL-UNNAMED",
+		"-Dsun.java2d.metal=false",
+		"-Dsun.java2d.opengl=true"
 	args "--developer-mode", "--debug"
 }
 
