@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "tagId": "9c1b6f2e-2b1d-4d4e-8a5b-0f6a7c9e1d23",
+  "name": "slayer",
+  "iconItemId": 4155,
+  "itemIds": [4155, 8901, -5698],
+  "layout": null,
+  "revision": 1,
+  "deleted": false,
+  "updatedAt": "2026-09-07T20:30:00Z"
+}

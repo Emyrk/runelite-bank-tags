@@ -67,6 +67,7 @@ Do not rename the config group or keys without a migration. Preserve tag standar
 - Do not silently overwrite divergent local and remote data. The conflict policy, group identity, authentication model, and deletion semantics must be explicitly chosen and documented before implementation.
 - Treat protocol payloads as versioned. Reject or safely ignore unsupported schema versions.
 - Keep local-only UI preferences out of the shared document unless the design explicitly changes this. The expected shared candidates are item tags, ordered tabs, icons, and layouts. See `docs/sync-design.md`.
+- The wire protocol is `docs/remote-sync-protocol.md`; fixtures under `src/test/resources/fixtures/sync/v1/` are the source of truth for the server and site repos. Change both together or neither.
 
 ## RuneLite constraints
 

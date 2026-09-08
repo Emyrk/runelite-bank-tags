@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "tagId": "5e4a8e36-e5f4-4daa-ae7a-e510f3e66721",
+  "name": "herblore",
+  "iconItemId": 952,
+  "itemIds": [199, 201, -203],
+  "layout": [199, 201, -1, 203],
+  "revision": 7,
+  "deleted": false,
+  "updatedAt": "2026-09-07T20:00:00Z"
+}

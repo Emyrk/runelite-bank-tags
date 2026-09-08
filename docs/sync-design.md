@@ -133,7 +133,7 @@ Use complete per-tag snapshots with optimistic concurrency. The server rejects a
 
 If a remote revision changes while the local content still matches its last synchronized hash, apply remote automatically. If the local hash also changed, mark only that tag conflicted and preserve both the local synchronized cache and the remote server version until the user resolves it.
 
-The remaining v1 decision is whether users may explicitly overwrite the remote version after a conflict or whether resolution is remote-wins only. Do not silently apply last-writer-wins behavior.
+Decided: users may explicitly choose `Overwrite remote version` after a conflict, behind a confirmation. Do not silently apply last-writer-wins behavior.
 
 Operations needing special attention:
 
@@ -146,18 +146,7 @@ Operations needing special attention:
 
 ## Group identity and authentication
 
-This remains unresolved.
-
-The implementation needs a way to map multiple plugin installations to one server-side group without collecting RuneLite or Jagex credentials. Questions include:
-
-- Is a group created with an invite code, shared secret, or server account?
-- How is a member removed or a leaked invite rotated?
-- Can a user belong to more than one shared group?
-- Is the character name required at all?
-- What does the server log, and for how long?
-- How are write permissions separated from read permissions?
-
-Do not place server secrets in the repository. Do not log authorization headers or invite secrets.
+Decided: a group is identified by the existing groupiron.men group name and authenticated by the existing group token sent as `Authorization: <group token>`, nothing else. Anyone holding the token may read and edit bank tags. The plugin sends no RuneLite or Jagex credentials, no character name, and no other identifier. Do not place server secrets in the repository. Do not log authorization headers or tokens.
 
 ## RuneLite privacy and configuration requirements
 
@@ -199,12 +188,14 @@ Integration tests should use a mock HTTP server. In-game verification remains ma
 
 ## Decisions required before coding
 
-- Authentication and group enrollment.
-- Server ownership and endpoint configuration.
-- Snapshot versus operation protocol.
-- Conflict and deletion semantics.
-- Whether hidden-tag state is shared or local.
-- Pull triggers and polling or push strategy.
-- Offline edit queue behavior.
-- Maximum document size and rate limits.
-- User-visible status and conflict messages.
+All decided on September 8, 2026 (issue #3). The normative protocol is `docs/remote-sync-protocol.md`.
+
+- Authentication and group enrollment: the existing group name and group token; token holders may edit (yes).
+- Server ownership and endpoint configuration: the group-ironmen server fork, routes under `/api/group/{group_name}`; the base URL and credentials come from `emyrk-bank-tags-sync-settings`.
+- Snapshot versus operation protocol: snapshot protocol. Each write is a complete per-tag document; order is a separate complete list.
+- Conflict and deletion semantics: HTTP conditional headers (`If-Match` / `If-None-Match`) with server-issued revisions. Deletes are tombstones retained for 90 days. `Overwrite remote version` is allowed in v1 behind a confirmation.
+- Hidden-tag state: local-only. It is never part of `SharedBankTag`. `initializeSyncStorageFromLocal` still copies `hidden_<tag>` into the sync namespace, which is fine because that namespace is local.
+- Pull triggers and push strategy: polling of the manifest with `If-None-Match`, no push.
+- Offline edit queue behavior: dirty tags stay dirty locally and are retried with exponential backoff, capped at 5 minutes.
+- Maximum document size and rate limits: 100 000 bytes per request body; 4000 item IDs and 4000 layout slots per tag; names 1–50 characters.
+- User-visible status and conflict messages: `Use remote version`, `Overwrite remote version`, and `Retry sync` per conflicted tag; `invalid credentials` status on `401`.

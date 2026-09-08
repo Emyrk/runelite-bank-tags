@@ -1,0 +1,12 @@
+[
+  "unsupported_schema",
+  "invalid_tag_id",
+  "invalid_tag",
+  "invalid_order",
+  "duplicate_name",
+  "tag_exists",
+  "tag_not_found",
+  "stale_revision",
+  "precondition_required",
+  "payload_too_large"
+]

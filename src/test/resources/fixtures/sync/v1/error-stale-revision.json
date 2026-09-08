@@ -1,0 +1,5 @@
+{
+  "error": "stale_revision",
+  "message": "tag revision 7 is stale; current is 8",
+  "current": { "tagId": "5e4a8e36-e5f4-4daa-ae7a-e510f3e66721", "name": "herblore", "revision": 8, "deleted": false }
+}
