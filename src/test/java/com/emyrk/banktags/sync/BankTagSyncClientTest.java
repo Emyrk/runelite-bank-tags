@@ -372,7 +372,10 @@ public class BankTagSyncClientTest
 	@Test
 	public void cancelAllCancelsInFlight() throws Exception
 	{
-		server.enqueue(jsonResponse(200, fixture("manifest.json")).setBodyDelay(5, TimeUnit.SECONDS));
+		// The delay must exceed the 1 s cancellation deadline below but stay well under MockWebServer's
+		// 5 s shutdown grace: the serving thread sleeps for the full delay even after the client cancels,
+		// and a longer delay makes tearDown's shutdown() fail on slow CI runners.
+		server.enqueue(jsonResponse(200, fixture("manifest.json")).setBodyDelay(2, TimeUnit.SECONDS));
 
 		Await<ManifestResult> await = new Await<>();
 		client.getManifest(null, await);
