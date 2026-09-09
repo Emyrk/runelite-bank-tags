@@ -110,6 +110,22 @@ starting it, so it picks up the new jar.
 Disable RuneLite's built-in Bank Tags plugin, then enable **Bank Tags
 Extended** in the plugin list.
 
+### Updating the Bolt development JAR
+
+After changing the plugin, close its RuneLite window and run:
+
+```sh
+./scripts/update-bolt-dev.sh
+```
+
+The script builds the executable development JAR, using a temporary Nix JDK when no host JDK is available, and installs it at:
+
+```text
+~/.var/app/com.adamcake.Bolt/data/bolt-launcher/dev-jars/bank-tags-extended-dev.jar
+```
+
+Keep Bolt's custom RuneLite JAR pointed at that path, leave its custom RuneLite launch command blank, and relaunch RuneLite after each update.
+
 ## Upstream source
 
 The fork was initially ported from RuneLite release `1.12.38`, revision `b505980edd4576104368874d4597bca7b7c463a1`:

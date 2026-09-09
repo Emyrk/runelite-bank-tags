@@ -80,7 +80,11 @@ tasks.register('run', JavaExec) {
 tasks.register('shadowJar', Jar) {
 	dependsOn configurations.testRuntimeClasspath
 	manifest {
-		attributes('Main-Class': pluginMainClass, 'Multi-Release': true)
+		attributes(
+			'Main-Class': pluginMainClass,
+			'Multi-Release': true,
+			'Add-Opens': 'java.base/java.lang java.base/java.lang.reflect java.base/java.net java.base/java.io'
+		)
 	}
 
 	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
