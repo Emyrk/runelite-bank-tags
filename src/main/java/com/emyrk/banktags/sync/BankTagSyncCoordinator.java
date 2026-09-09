@@ -2,7 +2,7 @@ package com.emyrk.banktags.sync;
 
 import com.emyrk.banktags.BankTagsPlugin;
 import com.emyrk.banktags.BankTagsStorage;
-import com.emyrk.banktags.BankTagsSyncConfig;
+import com.emyrk.banktags.BankTagsConfig;
 import com.emyrk.banktags.sync.BankTagSyncMetadata.Conflict;
 import com.emyrk.banktags.sync.BankTagSyncMetadata.TagMeta;
 import com.emyrk.banktags.sync.BankTagSyncStatus.GlobalState;
@@ -73,7 +73,7 @@ public class BankTagSyncCoordinator
 	private final BankTagSyncMetadata metadata;
 	private final BankTagSnapshotService snapshots;
 	private final BankTagsStorage storage;
-	private final BankTagsSyncConfig config;
+	private final BankTagsConfig config;
 	private final TabManager tabManager;
 	// Provider: TabInterface -> coordinator -> TabInterface would otherwise be a constructor cycle.
 	private final Provider<TabInterface> tabInterface;
@@ -109,7 +109,7 @@ public class BankTagSyncCoordinator
 
 	@Inject
 	public BankTagSyncCoordinator(BankTagSyncClient client, BankTagSyncMetadata metadata,
-		BankTagSnapshotService snapshots, BankTagsStorage storage, BankTagsSyncConfig config,
+		BankTagSnapshotService snapshots, BankTagsStorage storage, BankTagsConfig config,
 		TabManager tabManager, Provider<TabInterface> tabInterface, BankTagsPlugin plugin,
 		ScheduledExecutorService executor, ClientThread clientThread)
 	{

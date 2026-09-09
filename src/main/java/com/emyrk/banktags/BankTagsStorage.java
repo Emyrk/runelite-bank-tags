@@ -13,10 +13,10 @@ public class BankTagsStorage
 	public static final String SYNC_STORAGE_INITIALIZED_KEY = "syncStorageInitialized";
 
 	private final ConfigManager configManager;
-	private final BankTagsSyncConfig syncConfig;
+	private final BankTagsConfig syncConfig;
 
 	@Inject
-	BankTagsStorage(ConfigManager configManager, BankTagsSyncConfig syncConfig)
+	BankTagsStorage(ConfigManager configManager, BankTagsConfig syncConfig)
 	{
 		this.configManager = configManager;
 		this.syncConfig = syncConfig;

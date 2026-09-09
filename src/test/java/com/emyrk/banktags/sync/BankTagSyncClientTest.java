@@ -1,6 +1,6 @@
 package com.emyrk.banktags.sync;
 
-import com.emyrk.banktags.BankTagsSyncConfig;
+import com.emyrk.banktags.BankTagsConfig;
 import com.emyrk.banktags.sync.model.BankTagManifest;
 import com.emyrk.banktags.sync.model.ManifestResult;
 import com.emyrk.banktags.sync.model.SharedBankTag;
@@ -41,7 +41,7 @@ public class BankTagSyncClientTest
 
 	private final Gson gson = new Gson();
 	private MockWebServer server;
-	private BankTagsSyncConfig config;
+	private BankTagsConfig config;
 	private BankTagSyncClient client;
 
 	@Before
@@ -49,7 +49,7 @@ public class BankTagSyncClientTest
 	{
 		server = new MockWebServer();
 		server.start();
-		config = mock(BankTagsSyncConfig.class);
+		config = mock(BankTagsConfig.class);
 		when(config.serverBaseUrl()).thenReturn(server.url("/").toString());
 		when(config.groupName()).thenReturn("gim");
 		when(config.groupToken()).thenReturn("tok-123");

@@ -27,10 +27,21 @@ package com.emyrk.banktags;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.ConfigSection;
 
-@ConfigGroup(BankTagsPlugin.CONFIG_GROUP)
-public interface BankTagsConfig extends Config
+@ConfigGroup(BankTagsStorage.SYNC_SETTINGS_GROUP)
+public interface BankTagsConfig extends Config, BankTagsSyncConfig
 {
+	String SYNC_SECTION = "sync";
+
+	@ConfigSection(
+		name = "Synchronization",
+		description = "Share bank tags with a Group Ironmen group.",
+		position = 10,
+		closedByDefault = true
+	)
+	String syncSection = SYNC_SECTION;
+
 	@ConfigItem(
 		keyName = "useTabs",
 		name = "Use tag tabs",

@@ -35,7 +35,7 @@ public class TagManagerSyncStorageTest
 
 	@Mock
 	@Bind
-	private BankTagsSyncConfig syncConfig;
+	private BankTagsConfig syncConfig;
 
 	@Inject
 	private TagManager tagManager;

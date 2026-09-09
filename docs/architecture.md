@@ -4,7 +4,7 @@
 
 Bank Tags Extended is a standalone external RuneLite plugin based on RuneLite's built-in Bank Tags plugin. It replaces the built-in plugin's bank tag UI and stores an independent copy of its configuration under `emyrk-bank-tags`.
 
-The plugin has no server integration today. All durable data is stored through RuneLite's `ConfigManager`.
+The plugin optionally synchronizes tag data through the groupiron.men API. Local tag data, synchronized cache data, connection settings, and sync metadata remain durable through RuneLite's `ConfigManager`.
 
 ## Lifecycle
 
@@ -21,7 +21,7 @@ On startup it:
 
 On shutdown it stops the coordinator first (cancelling polling, debounces, and in-flight requests), then unregisters those components, removes custom widgets and sprite overrides, and reinitializes the normal bank interface.
 
-A `ConfigChanged` event for `emyrk-bank-tags-sync-settings` stops and restarts the coordinator. When the `enabled` flag flips, the plugin also reloads `TabManager` and reinitializes the bank because `BankTagsStorage.getActiveGroup()` switches repositories immediately.
+RuneLite displays one configuration proxy per plugin, so `BankTagsConfig` is the single visible configuration interface. It uses `emyrk-bank-tags-sync-settings` for both local UI preferences and sync connection settings, while tag data remains in `emyrk-bank-tags` or `emyrk-bank-tags-sync`. On upgrade, existing UI preferences are copied once from `emyrk-bank-tags` when the destination key is absent. A sync-related `ConfigChanged` event stops and restarts the coordinator. When the `enabled` flag flips, the plugin also reloads `TabManager` and reinitializes the bank because `BankTagsStorage.getActiveGroup()` switches repositories immediately.
 
 The `resetSyncCache` item in that group is a self-resetting action (RuneLite config panels have no buttons; its `warning` is the confirmation dialog). When its value becomes `true` the plugin immediately writes it back to `false`, stops the coordinator, calls `BankTagsStorage.resetSyncStorage()` (which unsets every `emyrk-bank-tags-sync.*` key: tag data, `sync*` metadata, and the `syncStorageInitialized` marker, never touching `emyrk-bank-tags` or `banktags`), then on the client thread reloads `TabManager`, reinitializes the bank, and starts the coordinator again, which re-runs the first-enable path and reloads the group's tags from the server. The write-back event (`false`) is ignored so the coordinator is not restarted twice.
 
@@ -87,7 +87,7 @@ When the bank opens, it loads tab names from configuration, loads each icon, bui
 
 ## Configuration schema
 
-All keys are in the `emyrk-bank-tags` group.
+Tag data and migration state remain in `emyrk-bank-tags` when sync is disabled. The visible plugin preferences and sync connection settings use `emyrk-bank-tags-sync-settings` so RuneLite can render one consolidated settings panel.
 
 | Key | Value | Ownership |
 | --- | --- | --- |

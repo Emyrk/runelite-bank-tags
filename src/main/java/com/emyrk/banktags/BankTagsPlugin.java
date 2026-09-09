@@ -116,6 +116,11 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 	public static final int BANK_ITEM_START_X = 51;
 	public static final int BANK_ITEM_START_Y = 0;
 
+	private static final Set<String> LOCAL_UI_SETTING_KEYS = Set.of(
+		"useTabs", "rememberTab", "removeTabSeparators", "preventTagTabDrags", "position", "tab");
+	private static final Set<String> SYNC_RESTART_KEYS = Set.of(
+		"enabled", "groupName", "groupToken", "serverBaseUrl", "pollIntervalSeconds", "uploadDebounceSeconds");
+
 	@Inject
 	private ItemManager itemManager;
 
@@ -186,13 +191,24 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 	@Provides
 	BankTagsConfig getConfig(ConfigManager configManager)
 	{
+		migrateLocalUiSettings(configManager);
 		return configManager.getConfig(BankTagsConfig.class);
 	}
 
-	@Provides
-	BankTagsSyncConfig getSyncConfig(ConfigManager configManager)
+	static void migrateLocalUiSettings(ConfigManager configManager)
 	{
-		return configManager.getConfig(BankTagsSyncConfig.class);
+		for (String key : LOCAL_UI_SETTING_KEYS)
+		{
+			if (configManager.getConfiguration(BankTagsStorage.SYNC_SETTINGS_GROUP, key) != null)
+			{
+				continue;
+			}
+			String value = configManager.getConfiguration(CONFIG_GROUP, key);
+			if (value != null)
+			{
+				configManager.setConfiguration(BankTagsStorage.SYNC_SETTINGS_GROUP, key, value);
+			}
+		}
 	}
 
 	@Override
@@ -225,6 +241,7 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 	public void startUp()
 	{
 		migrateBuiltinConfig();
+		migrateLocalUiSettings(configManager);
 		cleanConfig();
 		spriteManager.addSpriteOverrides(TabSprites.values());
 		eventBus.register(tabInterface);
@@ -542,32 +559,39 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 	@Subscribe
 	public void onConfigChanged(ConfigChanged configChanged)
 	{
-		if (configChanged.getGroup().equals(CONFIG_GROUP) && configChanged.getKey().equals("useTabs"))
+		if (!BankTagsStorage.SYNC_SETTINGS_GROUP.equals(configChanged.getGroup()))
+		{
+			return;
+		}
+		if ("useTabs".equals(configChanged.getKey()))
 		{
 			clientThread.invokeLater(this::reinitBank);
+			return;
 		}
-		else if (configChanged.getGroup().equals(BankTagsStorage.SYNC_SETTINGS_GROUP))
+		if (RESET_SYNC_CACHE_KEY.equals(configChanged.getKey()))
 		{
-			if (RESET_SYNC_CACHE_KEY.equals(configChanged.getKey()))
+			// a self-resetting action; the write-back below fires this event again with "false"
+			if ("true".equals(configChanged.getNewValue()))
 			{
-				// a self-resetting action; the write-back below fires this event again with "false"
-				if ("true".equals(configChanged.getNewValue()))
-				{
-					resetSyncCache();
-				}
-				return;
+				resetSyncCache();
 			}
-			syncCoordinator.stop();
-			syncCoordinator.start();
-			if ("enabled".equals(configChanged.getKey()))
+			return;
+		}
+		if (!SYNC_RESTART_KEYS.contains(configChanged.getKey()))
+		{
+			return;
+		}
+
+		syncCoordinator.stop();
+		syncCoordinator.start();
+		if ("enabled".equals(configChanged.getKey()))
+		{
+			// BankTagsStorage.getActiveGroup() switches repositories the moment the flag flips
+			clientThread.invokeLater(() ->
 			{
-				// BankTagsStorage.getActiveGroup() switches repositories the moment the flag flips
-				clientThread.invokeLater(() ->
-				{
-					tabManager.reload();
-					reinitBank();
-				});
-			}
+				tabManager.reload();
+				reinitBank();
+			});
 		}
 	}
 

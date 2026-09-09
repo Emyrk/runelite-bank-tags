@@ -78,10 +78,6 @@ public class BankTagsPluginTest
 
 	@Mock
 	@Bind
-	private BankTagsSyncConfig bankTagsSyncConfig;
-
-	@Mock
-	@Bind
 	private RuneLiteConfig runeLiteConfig;
 
 	@Mock

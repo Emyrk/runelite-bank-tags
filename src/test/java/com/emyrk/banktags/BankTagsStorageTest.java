@@ -15,14 +15,14 @@ public class BankTagsStorageTest
 {
 	private final Map<String, String> values = new HashMap<>();
 	private ConfigManager configManager;
-	private BankTagsSyncConfig syncConfig;
+	private BankTagsConfig syncConfig;
 	private BankTagsStorage storage;
 
 	@Before
 	public void before()
 	{
 		configManager = FakeConfigManager.create(values);
-		syncConfig = mock(BankTagsSyncConfig.class);
+		syncConfig = mock(BankTagsConfig.class);
 		storage = new BankTagsStorage(configManager, syncConfig);
 	}
 

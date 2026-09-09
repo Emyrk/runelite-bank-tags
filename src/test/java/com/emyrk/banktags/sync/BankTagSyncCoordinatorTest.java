@@ -3,7 +3,6 @@ package com.emyrk.banktags.sync;
 import com.emyrk.banktags.BankTagsConfig;
 import com.emyrk.banktags.BankTagsPlugin;
 import com.emyrk.banktags.BankTagsStorage;
-import com.emyrk.banktags.BankTagsSyncConfig;
 import com.emyrk.banktags.FakeConfigManager;
 import com.emyrk.banktags.FakeScheduler;
 import com.emyrk.banktags.TagManager;
@@ -96,7 +95,7 @@ public class BankTagSyncCoordinatorTest
 
 	private MockWebServer server;
 	private ConfigManager configManager;
-	private BankTagsSyncConfig config;
+	private BankTagsConfig config;
 	private FakeScheduler scheduler;
 	private ClientThread clientThread;
 	private TabInterface tabInterface;
@@ -150,7 +149,7 @@ public class BankTagSyncCoordinatorTest
 		server.start();
 
 		configManager = FakeConfigManager.create(values);
-		config = mock(BankTagsSyncConfig.class);
+		config = mock(BankTagsConfig.class);
 		when(config.enabled()).thenReturn(true);
 		when(config.groupName()).thenReturn("gim");
 		when(config.groupToken()).thenReturn("tok-123");
@@ -213,8 +212,7 @@ public class BankTagSyncCoordinatorTest
 			protected void configure()
 			{
 				bind(ConfigManager.class).toInstance(configManager);
-				bind(BankTagsSyncConfig.class).toInstance(config);
-				bind(BankTagsConfig.class).toInstance(mock(BankTagsConfig.class));
+				bind(BankTagsConfig.class).toInstance(config);
 				bind(Client.class).toInstance(mock(Client.class));
 				ItemManager itemManager = mock(ItemManager.class);
 				when(itemManager.canonicalize(anyInt())).thenAnswer(invocation -> invocation.getArgument(0));

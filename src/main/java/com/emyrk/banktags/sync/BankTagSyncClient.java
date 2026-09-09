@@ -1,6 +1,6 @@
 package com.emyrk.banktags.sync;
 
-import com.emyrk.banktags.BankTagsSyncConfig;
+import com.emyrk.banktags.BankTagsConfig;
 import com.emyrk.banktags.sync.model.BankTagManifest;
 import com.emyrk.banktags.sync.model.ManifestResult;
 import com.emyrk.banktags.sync.model.SharedBankTag;
@@ -58,11 +58,11 @@ public class BankTagSyncClient
 	private static final String ROUTE_ORDER = "order";
 
 	private final OkHttpClient client;
-	private final BankTagsSyncConfig config;
+	private final BankTagsConfig config;
 	private final BankTagSyncJson json;
 
 	@Inject
-	public BankTagSyncClient(OkHttpClient okHttpClient, BankTagsSyncConfig config, BankTagSyncJson json)
+	public BankTagSyncClient(OkHttpClient okHttpClient, BankTagsConfig config, BankTagSyncJson json)
 	{
 		this.client = okHttpClient.newBuilder()
 			.callTimeout(15, TimeUnit.SECONDS)
