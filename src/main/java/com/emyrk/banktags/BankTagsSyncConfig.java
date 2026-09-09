@@ -24,7 +24,7 @@ public interface BankTagsSyncConfig extends Config
 	@ConfigItem(
 		keyName = "groupName",
 		name = "Group name",
-		description = "The group name used on groupiron.men.",
+		description = "The private group name configured on the synchronization server.",
 		section = BankTagsConfig.SYNC_SECTION,
 		position = 12
 	)
@@ -49,7 +49,7 @@ public interface BankTagsSyncConfig extends Config
 	@ConfigItem(
 		keyName = "serverBaseUrl",
 		name = "Server URL override",
-		description = "Leave blank to use the public groupiron.men server.",
+		description = "Leave blank to use https://ironman.masley.com.",
 		section = BankTagsConfig.SYNC_SECTION,
 		position = 14
 	)

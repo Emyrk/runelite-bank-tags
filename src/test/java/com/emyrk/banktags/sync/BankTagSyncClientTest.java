@@ -343,16 +343,16 @@ public class BankTagSyncClientTest
 	}
 
 	@Test
-	public void blankBaseUrlDefaultsToGroupIronMen()
+	public void blankBaseUrlDefaultsToMasleyServer()
 	{
 		when(config.serverBaseUrl()).thenReturn("");
 		HttpUrl url = client.buildUrl("bank-tags");
-		assertEquals("groupiron.men", url.host());
+		assertEquals("ironman.masley.com", url.host());
 		assertEquals("https", url.scheme());
 		assertEquals("/api/group/gim/bank-tags", url.encodedPath());
 
 		when(config.serverBaseUrl()).thenReturn("   ");
-		assertEquals("groupiron.men", client.buildUrl("bank-tag-order").host());
+		assertEquals("ironman.masley.com", client.buildUrl("bank-tag-order").host());
 	}
 
 	@Test

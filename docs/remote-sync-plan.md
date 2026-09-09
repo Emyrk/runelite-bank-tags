@@ -146,7 +146,7 @@ Add opt-in settings to `BankTagsConfig`:
 - Enable remote group sync, default `false`, with the required third-party server warning.
 - Group name.
 - Group token, rendered as a secret field when supported by the RuneLite config API.
-- Optional server base URL for self-hosting, blank meaning the public groupiron.men server.
+- Optional server base URL for self-hosting, blank meaning the private `https://ironman.masley.com` server.
 - Poll interval with a conservative minimum, recommended default 10 seconds.
 - Debounce delay for automatic uploads, with a safe minimum and recommended default of 1 second.
 

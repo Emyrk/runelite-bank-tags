@@ -48,7 +48,7 @@ public class BankTagSyncClient
 			throws BankTagSyncJson.UnsupportedSchemaException, BankTagSyncJson.InvalidDocumentException;
 	}
 
-	static final String DEFAULT_BASE_URL = "https://groupiron.men";
+	static final String DEFAULT_BASE_URL = "https://ironman.masley.com";
 	static final String ERROR_INVALID_SERVER_URL = "invalid_server_url";
 
 	private static final Object CALL_TAG = new Object();
