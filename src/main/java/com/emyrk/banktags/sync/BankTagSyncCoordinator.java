@@ -3,13 +3,17 @@ package com.emyrk.banktags.sync;
 import com.emyrk.banktags.BankTagsPlugin;
 import com.emyrk.banktags.BankTagsStorage;
 import com.emyrk.banktags.BankTagsConfig;
+import com.emyrk.banktags.sync.BankTagFolderSyncMetadata.FolderMeta;
 import com.emyrk.banktags.sync.BankTagSyncMetadata.Conflict;
 import com.emyrk.banktags.sync.BankTagSyncMetadata.TagMeta;
 import com.emyrk.banktags.sync.BankTagSyncStatus.GlobalState;
 import com.emyrk.banktags.sync.BankTagSyncStatus.TagState;
+import com.emyrk.banktags.sync.model.BankTagFolderManifest;
 import com.emyrk.banktags.sync.model.BankTagManifest;
+import com.emyrk.banktags.sync.model.FolderManifestResult;
 import com.emyrk.banktags.sync.model.ManifestResult;
 import com.emyrk.banktags.sync.model.SharedBankTag;
+import com.emyrk.banktags.sync.model.SharedBankTagFolder;
 import com.emyrk.banktags.sync.model.SyncFailure;
 import com.emyrk.banktags.tabs.TabInterface;
 import com.emyrk.banktags.tabs.TabManager;
@@ -31,6 +35,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import javax.inject.Singleton;
@@ -71,6 +76,8 @@ public class BankTagSyncCoordinator
 
 	private final BankTagSyncClient client;
 	private final BankTagSyncMetadata metadata;
+	private final BankTagFolderSyncMetadata folderMetadata;
+	private final BankTagFolderManager folderManager;
 	private final BankTagSnapshotService snapshots;
 	private final BankTagsStorage storage;
 	private final BankTagsConfig config;
@@ -104,17 +111,27 @@ public class BankTagSyncCoordinator
 	private final Map<String, ScheduledFuture<?>> deleteFutures = new ConcurrentHashMap<>();
 	private final Set<String> uploadsInFlight = ConcurrentHashMap.newKeySet();
 	private final Set<String> deletesInFlight = ConcurrentHashMap.newKeySet();
+	private final Map<String, ScheduledFuture<?>> folderDebounceFutures = new ConcurrentHashMap<>();
+	private final Map<String, ScheduledFuture<?>> folderDeleteFutures = new ConcurrentHashMap<>();
+	private final Set<String> folderUploadsInFlight = ConcurrentHashMap.newKeySet();
+	private final Set<String> folderDeletesInFlight = ConcurrentHashMap.newKeySet();
+	private ScheduledFuture<?> folderOrderFuture;
+	private boolean folderOrderInFlight;
+	private boolean folderOrderPending;
 	private boolean orderInFlight;
 	private boolean orderPending;
 
 	@Inject
 	public BankTagSyncCoordinator(BankTagSyncClient client, BankTagSyncMetadata metadata,
+		BankTagFolderSyncMetadata folderMetadata, BankTagFolderManager folderManager,
 		BankTagSnapshotService snapshots, BankTagsStorage storage, BankTagsConfig config,
 		TabManager tabManager, Provider<TabInterface> tabInterface, BankTagsPlugin plugin,
 		ScheduledExecutorService executor, ClientThread clientThread)
 	{
 		this.client = client;
 		this.metadata = metadata;
+		this.folderMetadata = folderMetadata;
+		this.folderManager = folderManager;
 		this.snapshots = snapshots;
 		this.storage = storage;
 		this.config = config;
@@ -165,7 +182,11 @@ public class BankTagSyncCoordinator
 		cancelScheduledWork();
 		uploadsInFlight.clear();
 		deletesInFlight.clear();
+		folderUploadsInFlight.clear();
+		folderDeletesInFlight.clear();
 		rejectedTagIds.clear();
+		folderOrderInFlight = false;
+		folderOrderPending = false;
 		orderInFlight = false;
 		orderPending = false;
 		pollInFlight.set(false);
@@ -190,6 +211,18 @@ public class BankTagSyncCoordinator
 			future.cancel(false);
 		}
 		deleteFutures.clear();
+		for (ScheduledFuture<?> future : folderDebounceFutures.values())
+		{
+			future.cancel(false);
+		}
+		folderDebounceFutures.clear();
+		for (ScheduledFuture<?> future : folderDeleteFutures.values())
+		{
+			future.cancel(false);
+		}
+		folderDeleteFutures.clear();
+		cancel(folderOrderFuture);
+		folderOrderFuture = null;
 	}
 
 	public boolean isApplyingRemote()
@@ -530,7 +563,7 @@ public class BankTagSyncCoordinator
 			onRequestSucceeded();
 			if (result.isNotModified())
 			{
-				finishPoll();
+				pollFolders(gen);
 				return;
 			}
 			planRemoteChanges(gen, result.getManifest());
@@ -716,7 +749,7 @@ public class BankTagSyncCoordinator
 			applyingRemote = false;
 		}
 		tabInterface.get().refreshTabs();
-		finishPoll();
+		pollFolders(epoch.get());
 	}
 
 	private void deleteLocally(String id, String name)
@@ -729,6 +762,150 @@ public class BankTagSyncCoordinator
 		rejectedTagIds.remove(id);
 	}
 
+	private void pollFolders(int gen)
+	{
+		long revision = folderMetadata.groupRevision();
+		client.getFolderManifest(revision == 0 ? null : revision, onClientThread(gen, result ->
+		{
+			onRequestSucceeded();
+			if (result.isNotModified())
+			{
+				finishPoll();
+				return;
+			}
+			planRemoteFolderChanges(gen, result.getManifest());
+		}, failure ->
+		{
+			pollInFlight.set(false);
+			onPollFailed(failure);
+		}));
+	}
+
+	private void planRemoteFolderChanges(int gen, BankTagFolderManifest manifest)
+	{
+		Map<String, FolderMeta> local = folderMetadata.allFolders();
+		List<String> toFetch = new ArrayList<>();
+		List<String> toDelete = new ArrayList<>();
+		boolean dirtyConflict = false;
+		for (BankTagFolderManifest.Entry entry : manifest.getFolders())
+		{
+			FolderMeta meta = local.get(entry.getFolderId());
+			if (meta == null)
+			{
+				if (!entry.isDeleted() && folderMetadata.pendingDelete(entry.getFolderId()) == null)
+				{
+					toFetch.add(entry.getFolderId());
+				}
+				continue;
+			}
+			if (entry.getRevision() == meta.revision)
+			{
+				continue;
+			}
+			if (isFolderDirty(entry.getFolderId(), meta))
+			{
+				dirtyConflict = true;
+				log.debug("bank tag folder sync conflict for {}", entry.getFolderId());
+				continue;
+			}
+			if (entry.isDeleted())
+			{
+				toDelete.add(entry.getFolderId());
+			}
+			else
+			{
+				toFetch.add(entry.getFolderId());
+			}
+		}
+		final boolean retainRevision = dirtyConflict;
+		final boolean orderChanged = manifest.getOrderRevision() != folderMetadata.orderRevision();
+		final boolean stateChanged = !toFetch.isEmpty() || !toDelete.isEmpty() || orderChanged;
+		fetchAllFolders(gen, toFetch, fetched ->
+		{
+			applyingRemote = true;
+			try
+			{
+				for (String id : toDelete)
+				{
+					folderManager.delete(id);
+					folderMetadata.removeFolder(id);
+					folderMetadata.removePendingDelete(id);
+				}
+				for (String id : manifest.getOrderedFolderIds())
+				{
+					SharedBankTagFolder folder = fetched.get(id);
+					if (folder != null)
+					{
+						folderManager.apply(folder);
+						folderMetadata.putFolder(id,
+							new FolderMeta(folder.getName(), folder.getRevision(), folder.contentHash()));
+					}
+				}
+				if (orderChanged && folderOrderFuture == null && !folderOrderInFlight)
+				{
+					folderManager.reorder(manifest.getOrderedFolderIds());
+				}
+				if (stateChanged)
+				{
+					folderMetadata.setOrderRevision(manifest.getOrderRevision());
+					if (!retainRevision)
+					{
+						folderMetadata.setGroupRevision(manifest.getGroupRevision());
+					}
+				}
+			}
+			finally
+			{
+				applyingRemote = false;
+			}
+			if (stateChanged)
+			{
+				tabInterface.get().refreshTabs();
+			}
+			finishPoll();
+		}, failure ->
+		{
+			pollInFlight.set(false);
+			onPollFailed(failure);
+		});
+	}
+
+	private boolean isFolderDirty(String folderId, FolderMeta meta)
+	{
+		SharedBankTagFolder folder = folderManager.get(folderId);
+		return folder != null && !folder.contentHash().equals(meta.baseHash);
+	}
+
+	private void fetchAllFolders(int gen, Collection<String> ids,
+		Consumer<Map<String, SharedBankTagFolder>> onAllFetched, Consumer<SyncFailure> onFailure)
+	{
+		if (ids.isEmpty())
+		{
+			onAllFetched.accept(Collections.emptyMap());
+			return;
+		}
+		Map<String, SharedBankTagFolder> fetched = new ConcurrentHashMap<>();
+		AtomicInteger remaining = new AtomicInteger(ids.size());
+		AtomicReference<SyncFailure> failed = new AtomicReference<>();
+		for (String id : ids)
+		{
+			client.getFolder(id, new BankTagSyncClient.Callback<SharedBankTagFolder>()
+			{
+				@Override public void onSuccess(SharedBankTagFolder value) { fetched.put(id, value); done(); }
+				@Override public void onFailure(SyncFailure failure) { failed.compareAndSet(null, failure); done(); }
+				private void done()
+				{
+					if (remaining.decrementAndGet() != 0) return;
+					clientThread.invoke(() ->
+					{
+						if (gen != epoch.get()) return;
+						if (failed.get() != null) onFailure.accept(failed.get()); else onAllFetched.accept(fetched);
+					});
+				}
+			});
+		}
+	}
+
 	/**
 	 * Client thread. Re-schedules every dirty tag, retries pending deletes, releases the poll, and
 	 * arms the next one.
@@ -739,6 +916,8 @@ public class BankTagSyncCoordinator
 		{
 			sweepDirty();
 			retryPendingDeletes();
+			sweepDirtyFolders();
+			retryPendingFolderDeletes();
 		}
 		finally
 		{
@@ -785,6 +964,31 @@ public class BankTagSyncCoordinator
 			if (!deletesInFlight.contains(id) && !deleteFutures.containsKey(id))
 			{
 				sendDelete(id, entry.getValue());
+			}
+		}
+	}
+
+	private void sweepDirtyFolders()
+	{
+		for (Map.Entry<String, FolderMeta> entry : folderMetadata.allFolders().entrySet())
+		{
+			String id = entry.getKey();
+			if (!folderDebounceFutures.containsKey(id) && !folderUploadsInFlight.contains(id)
+				&& isFolderDirty(id, entry.getValue()))
+			{
+				scheduleFolderUpload(id);
+			}
+		}
+	}
+
+	private void retryPendingFolderDeletes()
+	{
+		for (Map.Entry<String, Long> entry : folderMetadata.allPendingDeletes().entrySet())
+		{
+			String id = entry.getKey();
+			if (!folderDeletesInFlight.contains(id) && !folderDeleteFutures.containsKey(id))
+			{
+				sendFolderDelete(id, entry.getValue());
 			}
 		}
 	}
@@ -839,6 +1043,10 @@ public class BankTagSyncCoordinator
 		}
 		TagMeta meta = metadata.tag(id);
 		cancelDebounce(id);
+		for (String changedFolderId : folderManager.moveTag(id, null))
+		{
+			onFolderMutated(changedFolderId);
+		}
 		metadata.removeTag(id);
 		metadata.removeConflict(id);
 		rejectedTagIds.remove(id);
@@ -868,6 +1076,373 @@ public class BankTagSyncCoordinator
 			metadata.putTag(id, new TagMeta(name, 0, ""));
 		}
 		return id;
+	}
+
+	// ---------------------------------------------------------------- folders
+
+	/** Current persisted folders in display order. */
+	public List<SharedBankTagFolder> folders()
+	{
+		return active ? folderManager.folders() : Collections.emptyList();
+	}
+
+	/** Creates a stable-UUID folder locally and queues its remote create. */
+	@Nullable
+	public SharedBankTagFolder createFolder(String name)
+	{
+		if (!active || applyingRemote)
+		{
+			return null;
+		}
+		SharedBankTagFolder folder = folderManager.create(name);
+		folderMetadata.putFolder(folder.getFolderId(), new FolderMeta(folder.getName(), 0, ""));
+		onFolderMutated(folder.getFolderId());
+		onFolderOrderChanged();
+		return folder;
+	}
+
+	public void setFolderIcon(String folderId, int iconItemId)
+	{
+		if (!active || applyingRemote)
+		{
+			return;
+		}
+		folderManager.setIcon(folderId, iconItemId);
+		onFolderMutated(folderId);
+	}
+
+	@Nullable
+	public String tagNameForId(String tagId)
+	{
+		TagMeta meta = metadata.tag(tagId);
+		return meta == null ? null : meta.name;
+	}
+
+	public boolean isFolderCollapsed(String folderId)
+	{
+		return folderManager.isCollapsed(folderId);
+	}
+
+	public void setFolderCollapsed(String folderId, boolean collapsed)
+	{
+		folderManager.setCollapsed(folderId, collapsed);
+	}
+
+	public void renameFolder(String folderId, String name)
+	{
+		if (!active || applyingRemote)
+		{
+			return;
+		}
+		folderManager.rename(folderId, name);
+		onFolderMutated(folderId);
+	}
+
+	/** Deletes only the folder. Member tags remain present and become unfiled. */
+	public void deleteFolder(String folderId)
+	{
+		if (!active || applyingRemote)
+		{
+			return;
+		}
+		FolderMeta meta = folderMetadata.folder(folderId);
+		cancelFolderDebounce(folderId);
+		folderManager.delete(folderId);
+		folderMetadata.removeFolder(folderId);
+		if (meta != null && meta.revision > 0)
+		{
+			folderMetadata.putPendingDelete(folderId, meta.revision);
+			scheduleFolderDelete(folderId, meta.revision);
+		}
+		onFolderOrderChanged();
+	}
+
+	/** Moves a tab to a folder. A {@code null} folder id means the unfiled section. */
+	public void moveTagToFolder(String tag, @Nullable String folderId)
+	{
+		if (!active || applyingRemote || tag == null)
+		{
+			return;
+		}
+		String tagId = metadata.tagIdForName(Text.standardize(tag));
+		if (tagId == null)
+		{
+			return;
+		}
+		for (String changedFolderId : folderManager.moveTag(tagId, folderId))
+		{
+			onFolderMutated(changedFolderId);
+		}
+	}
+
+	/** Moves a tab to a folder and positions it relative to another child when supplied. */
+	public void moveTagToFolder(String tag, @Nullable String folderId, @Nullable String destinationTag,
+		boolean insertMode)
+	{
+		if (!active || applyingRemote || tag == null)
+		{
+			return;
+		}
+		String tagId = metadata.tagIdForName(Text.standardize(tag));
+		String destinationTagId = destinationTag == null ? null
+			: metadata.tagIdForName(Text.standardize(destinationTag));
+		if (tagId == null)
+		{
+			return;
+		}
+		for (String changedFolderId : folderManager.moveTag(tagId, folderId, destinationTagId, insertMode))
+		{
+			onFolderMutated(changedFolderId);
+		}
+	}
+
+	public void moveTagToUnfiled(String tag)
+	{
+		moveTagToFolder(tag, null);
+	}
+
+	@Nullable
+	public String folderIdForTag(String tag)
+	{
+		String tagId = tag == null ? null : metadata.tagIdForName(Text.standardize(tag));
+		return tagId == null ? null : folderManager.folderIdForTag(tagId);
+	}
+
+	/** Existing and newly synchronized tabs with no folder membership appear here automatically. */
+	public List<String> unfiledTags()
+	{
+		if (!active)
+		{
+			return tabManager.tabNames();
+		}
+		Map<String, TagMeta> all = metadata.allTags();
+		List<String> ids = new ArrayList<>();
+		for (String name : tabManager.tabNames())
+		{
+			String id = metadata.tagIdForName(name);
+			if (id != null) ids.add(id);
+		}
+		Set<String> unfiledIds = new LinkedHashSet<>(folderManager.unfiledTagIds(ids));
+		List<String> names = new ArrayList<>();
+		for (String id : ids)
+		{
+			TagMeta meta = all.get(id);
+			if (meta != null && unfiledIds.contains(id)) names.add(meta.name);
+		}
+		return names;
+	}
+
+	public void reorderFolders(List<String> orderedFolderIds)
+	{
+		if (!active || applyingRemote)
+		{
+			return;
+		}
+		folderManager.reorder(orderedFolderIds);
+		onFolderOrderChanged();
+	}
+
+	/** Notification hook for callers that complete a compound folder mutation themselves. */
+	public void onFolderMutated(String folderId)
+	{
+		if (!active || applyingRemote || folderManager.get(folderId) == null)
+		{
+			return;
+		}
+		if (folderMetadata.folder(folderId) == null)
+		{
+			SharedBankTagFolder folder = folderManager.get(folderId);
+			folderMetadata.putFolder(folderId, new FolderMeta(folder.getName(), 0, ""));
+		}
+		scheduleFolderUpload(folderId);
+	}
+
+	public void onFolderOrderChanged()
+	{
+		if (!active || applyingRemote)
+		{
+			return;
+		}
+		cancel(folderOrderFuture);
+		folderOrderFuture = executor.schedule(() -> clientThread.invoke(this::uploadFolderOrder),
+			config.uploadDebounceSeconds(), TimeUnit.SECONDS);
+	}
+
+	/**
+	 * Applies one remote folder atomically from the coordinator's perspective. Observation is
+	 * suppressed for the full operation, so UI callbacks cannot echo it as a local upload.
+	 */
+	public void applyRemoteFolder(SharedBankTagFolder remote)
+	{
+		applyingRemote = true;
+		try
+		{
+			cancelFolderDebounce(remote.getFolderId());
+			folderManager.apply(remote);
+			if (remote.isDeleted())
+			{
+				folderMetadata.removeFolder(remote.getFolderId());
+				folderMetadata.removePendingDelete(remote.getFolderId());
+			}
+			else
+			{
+				folderMetadata.putFolder(remote.getFolderId(),
+					new FolderMeta(remote.getName(), remote.getRevision(), remote.contentHash()));
+			}
+		}
+		finally
+		{
+			applyingRemote = false;
+		}
+	}
+
+	private void scheduleFolderUpload(String folderId)
+	{
+		AtomicReference<ScheduledFuture<?>> self = new AtomicReference<>();
+		ScheduledFuture<?> future = executor.schedule(() ->
+		{
+			folderDebounceFutures.remove(folderId, self.get());
+			clientThread.invoke(() -> uploadFolder(folderId));
+		}, config.uploadDebounceSeconds(), TimeUnit.SECONDS);
+		self.set(future);
+		cancel(folderDebounceFutures.put(folderId, future));
+	}
+
+	private void cancelFolderDebounce(String folderId)
+	{
+		cancel(folderDebounceFutures.remove(folderId));
+	}
+
+	private void uploadFolder(String folderId)
+	{
+		if (!active || sendingSuspended() || !folderUploadsInFlight.add(folderId))
+		{
+			return;
+		}
+		SharedBankTagFolder local = folderManager.get(folderId);
+		FolderMeta meta = folderMetadata.folder(folderId);
+		if (local == null || meta == null)
+		{
+			folderUploadsInFlight.remove(folderId);
+			return;
+		}
+		String hash = local.contentHash();
+		if (hash.equals(meta.baseHash))
+		{
+			folderUploadsInFlight.remove(folderId);
+			return;
+		}
+		BankTagSyncClient.Callback<SharedBankTagFolder> callback = onClientThread(epoch.get(), remote ->
+		{
+			folderUploadsInFlight.remove(folderId);
+			onRequestSucceeded();
+			FolderMeta current = folderMetadata.folder(folderId);
+			if (current != null)
+			{
+				folderMetadata.putFolder(folderId, new FolderMeta(current.name, remote.getRevision(), hash));
+			}
+		}, failure ->
+		{
+			folderUploadsInFlight.remove(folderId);
+			handleConnectionFailure(failure);
+			log.debug("bank tag folder sync upload rejected: {}", failure.getKind());
+		});
+		if (meta.revision == 0)
+		{
+			client.createFolder(folderId, local, callback);
+		}
+		else
+		{
+			client.updateFolder(folderId, meta.revision, local, callback);
+		}
+	}
+
+	private void scheduleFolderDelete(String folderId, long revision)
+	{
+		ScheduledFuture<?> future = executor.schedule(() ->
+		{
+			folderDeleteFutures.remove(folderId);
+			clientThread.invoke(() -> sendFolderDelete(folderId, revision));
+		}, config.uploadDebounceSeconds(), TimeUnit.SECONDS);
+		cancel(folderDeleteFutures.put(folderId, future));
+	}
+
+	private void sendFolderDelete(String folderId, long revision)
+	{
+		if (!active || !folderDeletesInFlight.add(folderId))
+		{
+			return;
+		}
+		client.deleteFolder(folderId, revision, onClientThread(epoch.get(), remote ->
+		{
+			folderDeletesInFlight.remove(folderId);
+			folderMetadata.removePendingDelete(folderId);
+			onRequestSucceeded();
+		}, failure ->
+		{
+			folderDeletesInFlight.remove(folderId);
+			handleConnectionFailure(failure);
+			log.debug("bank tag folder sync delete rejected: {}", failure.getKind());
+		}));
+	}
+
+	private void uploadFolderOrder()
+	{
+		folderOrderFuture = null;
+		if (!active)
+		{
+			return;
+		}
+		if (folderOrderInFlight)
+		{
+			folderOrderPending = true;
+			return;
+		}
+		final int gen = epoch.get();
+		folderOrderInFlight = true;
+		client.putFolderOrder(folderMetadata.orderRevision(), folderManager.folderIds(),
+			onClientThread(gen, manifest -> onFolderOrderSuccess(gen, manifest), failure ->
+			{
+				BankTagFolderManifest current = failure.getCurrentFolderManifest();
+				if (failure.getKind() == SyncFailure.Kind.CONFLICT && current != null)
+				{
+					List<String> merged = reconcileOrder(folderManager.folderIds(), current.getOrderedFolderIds());
+					client.putFolderOrder(current.getOrderRevision(), merged, onClientThread(gen,
+						manifest -> onFolderOrderSuccess(gen, manifest),
+						retryFailure -> onFolderOrderFailure(retryFailure,
+							"bank tag folder sync order retry rejected")));
+					return;
+				}
+				onFolderOrderFailure(failure, "bank tag folder sync order rejected");
+			}));
+	}
+
+	private void onFolderOrderFailure(SyncFailure failure, String message)
+	{
+		folderOrderInFlight = false;
+		handleConnectionFailure(failure);
+		log.debug("{}: {}", message, failure.getKind());
+		if (folderOrderPending)
+		{
+			folderOrderPending = false;
+			onFolderOrderChanged();
+		}
+	}
+
+	private void onFolderOrderSuccess(int gen, BankTagFolderManifest manifest)
+	{
+		folderOrderInFlight = false;
+		folderMetadata.setOrderRevision(manifest.getOrderRevision());
+		onRequestSucceeded();
+		if (folderOrderPending)
+		{
+			folderOrderPending = false;
+			onFolderOrderChanged();
+		}
+		if (pollInFlight.compareAndSet(false, true))
+		{
+			planRemoteFolderChanges(gen, manifest);
+		}
 	}
 
 	// ---------------------------------------------------------------- recovery actions

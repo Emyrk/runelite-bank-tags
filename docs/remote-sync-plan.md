@@ -25,6 +25,12 @@ The existing `bank-tags-sync` script is a useful prototype. It proves that a tab
 9. **Synchronized data uses an isolated RuneLite configuration namespace.** The built-in `banktags` group and the existing `emyrk-bank-tags` local copy are never overwritten by remote synchronization.
 10. **The synchronized namespace remains an offline cache.** Network outages do not stop the bank UI from using the last synchronized tags.
 
+## Synchronized folder extension
+
+The implemented product also supports one level of synchronized folders. Folder documents and folder order use the independent routes and revisions frozen in `docs/remote-sync-protocol.md`. A folder contains ordered stable tag IDs, not tag names, so tag renames do not change membership. Existing tags remain unfiled until assigned. Folder deletion preserves children, and tag deletion detaches the tag from its folder.
+
+Both the RuneLite tab strip and the existing website editor support creating, renaming, dissolving, reordering, expanding, and collapsing folders, changing folder icons, and moving tags between folders or the unfiled section. Collapse state is local-only.
+
 ## User workflows
 
 ### Edit a tag in RuneLite

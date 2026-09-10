@@ -77,6 +77,14 @@ Tab right-click entries are `Widget.setAction(op, text)` slots dispatched by `op
 
 When the bank opens, it loads tab names from configuration, loads each icon, builds widgets, and optionally opens the remembered tab. UI callbacks that begin in chatbox completion handlers return to the client thread before changing plugin state.
 
+### Synchronized folders
+
+`BankTagFolderManager` owns local folder records in `emyrk-bank-tags-sync`. Each folder has a client-minted UUID, display name, icon item ID, and ordered child tag UUIDs. `folderOrder` stores the ordered folder IDs. Folder collapse state is a local preference under `emyrk-bank-tags-sync-settings` and is not synchronized.
+
+`BankTagFolderSyncJson`, `BankTagFolderSyncMetadata`, and the folder methods on `BankTagSyncClient` implement the independent folder protocol documented in `docs/remote-sync-protocol.md`. `BankTagSyncCoordinator` polls the folder manifest after each tag-manifest poll, applies clean remote folders with observation suppressed, debounces folder document and order writes, and retries pending folder deletions. Folder deletion preserves its tags. Tag deletion removes the tag UUID from its owning folder before the tag tombstone is queued.
+
+`TabInterface` renders folder headers, their expanded child rows, and unfiled tags. Folder-to-folder drags reorder folders. Tag drags move tags between folders, reorder children, or return them to the unfiled section. The existing flat tab strip remains in use when synchronization is inactive.
+
 ### `LayoutManager` and `Layout`
 
 `LayoutManager` loads and saves a layout for each tag. The persisted value is a CSV array of item IDs. Array position is the visual slot and `-1` means empty.

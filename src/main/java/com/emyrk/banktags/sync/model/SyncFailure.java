@@ -34,9 +34,20 @@ public final class SyncFailure
 	private final SharedBankTag currentTag;
 	@Nullable
 	private final BankTagManifest currentManifest;
+	@Nullable
+	private final SharedBankTagFolder currentFolder;
+	@Nullable
+	private final BankTagFolderManifest currentFolderManifest;
 
 	public SyncFailure(Kind kind, int httpStatus, @Nullable String errorCode, @Nullable String message,
 		@Nullable SharedBankTag currentTag, @Nullable BankTagManifest currentManifest)
+	{
+		this(kind, httpStatus, errorCode, message, currentTag, currentManifest, null, null);
+	}
+
+	public SyncFailure(Kind kind, int httpStatus, @Nullable String errorCode, @Nullable String message,
+		@Nullable SharedBankTag currentTag, @Nullable BankTagManifest currentManifest,
+		@Nullable SharedBankTagFolder currentFolder, @Nullable BankTagFolderManifest currentFolderManifest)
 	{
 		this.kind = kind;
 		this.httpStatus = httpStatus;
@@ -44,6 +55,8 @@ public final class SyncFailure
 		this.message = message;
 		this.currentTag = currentTag;
 		this.currentManifest = currentManifest;
+		this.currentFolder = currentFolder;
+		this.currentFolderManifest = currentFolderManifest;
 	}
 
 	public static SyncFailure network(@Nullable String message)
@@ -117,6 +130,18 @@ public final class SyncFailure
 	public BankTagManifest getCurrentManifest()
 	{
 		return currentManifest;
+	}
+
+	@Nullable
+	public SharedBankTagFolder getCurrentFolder()
+	{
+		return currentFolder;
+	}
+
+	@Nullable
+	public BankTagFolderManifest getCurrentFolderManifest()
+	{
+		return currentFolderManifest;
 	}
 
 	@Override

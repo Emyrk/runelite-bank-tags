@@ -83,6 +83,59 @@ ETags are the decimal revision in quotes, e.g. `ETag: "7"`. No `expectedRevision
 
 The path is `/bank-tag-order` (not `/bank-tags/order`) so it cannot collide with `/bank-tags/{tag_id}`.
 
+#### Folder extension (v1)
+
+Folders are an independent synchronized subprotocol. They do not change the frozen tag document or `/bank-tags` manifest. A folder is one level deep and contains an ordered list of stable tag UUIDs. A live tag may belong to at most one live folder. Tags omitted from every folder are unfiled.
+
+##### Folder document
+
+```json
+{
+  "schemaVersion": 1,
+  "folderId": "3f8c3ed2-6e1e-4b86-93b1-f7f874f17290",
+  "name": "Minigames",
+  "iconItemId": 952,
+  "orderedTagIds": ["5e4a8e36-e5f4-4daa-ae7a-e510f3e66721"],
+  "revision": 3,
+  "deleted": false,
+  "updatedAt": "2026-09-10T18:00:00Z"
+}
+```
+
+- `folderId` is a lowercase UUID v4 minted by the client.
+- `name` contains 1 to 50 characters after trimming.
+- `iconItemId` is a nonnegative integer. Zero means the client may display a child tag icon as a fallback.
+- `orderedTagIds` contains unique live tag UUIDs in display order.
+- `revision`, `deleted`, and `updatedAt` are server-managed as for tag documents.
+- Deleting a folder tombstones only the folder. Its children remain live and become unfiled.
+- Deleting a tag removes its ID from its owning folder and advances that folder's revision.
+
+##### Folder manifest
+
+```json
+{
+  "schemaVersion": 1,
+  "groupRevision": 51,
+  "orderRevision": 4,
+  "orderedFolderIds": ["3f8c3ed2-6e1e-4b86-93b1-f7f874f17290"],
+  "folders": [
+    { "folderId": "3f8c3ed2-6e1e-4b86-93b1-f7f874f17290", "name": "Minigames", "revision": 3, "deleted": false }
+  ]
+}
+```
+
+Folder group and order revisions are independent from tag manifest revisions. `orderedFolderIds` contains each live folder exactly once. `folders` includes retained tombstones.
+
+| Method | Path | Request headers | Success |
+| --- | --- | --- | --- |
+| `GET` | `/bank-tag-folders` | optional `If-None-Match: "<groupRevision>"` | `200` folder manifest, or `304` when unchanged |
+| `GET` | `/bank-tag-folders/{folder_id}` | none | `200` folder document |
+| `PUT` | `/bank-tag-folders/{folder_id}` | `If-None-Match: *` for create, or `If-Match: "<revision>"` for update | `201` or `200` folder document |
+| `DELETE` | `/bank-tag-folders/{folder_id}` | `If-Match: "<revision>"` | `200` tombstoned folder document |
+| `PUT` | `/bank-folder-order` | `If-Match: "<orderRevision>"` | `200` folder manifest |
+
+The folder order request body is `{ "schemaVersion": 1, "orderedFolderIds": [...] }`. Conditional-write and error semantics match the tag routes. Folder state is stored separately in SQLite by the private group-ironmen server. The browser and RuneLite keep expanded or collapsed state locally and never send it.
+
 #### Server storage
 
 Both tables in the existing `groupironman` schema, added as two named blocks in `db::update_schema` (`has_migration_run` / `commit_migration`), names `create_bank_tags_table` and `create_bank_tag_groups_table`.

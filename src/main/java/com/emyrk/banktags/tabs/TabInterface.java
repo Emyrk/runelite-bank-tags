@@ -38,8 +38,10 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.function.Consumer;
@@ -90,6 +92,7 @@ import static com.emyrk.banktags.BankTagsPlugin.VAR_TAG_SUFFIX;
 import com.emyrk.banktags.BankTagsService;
 import com.emyrk.banktags.sync.BankTagSyncCoordinator;
 import com.emyrk.banktags.sync.BankTagSyncStatus;
+import com.emyrk.banktags.sync.model.SharedBankTagFolder;
 import com.emyrk.banktags.TagManager;
 import net.runelite.client.ui.JagexColors;
 import net.runelite.client.util.ColorUtil;
@@ -116,6 +119,11 @@ public class TabInterface
 	private static final String TAG_INVENTORY = "Tag-inventory";
 	private static final String TAGTABS = "tagtabs";
 	private static final String OPEN_TAB_MENU = "View tag tabs";
+	private static final String NEW_FOLDER = "New folder";
+	private static final String TOGGLE_FOLDER = "Expand/collapse folder";
+	private static final String RENAME_FOLDER = "Rename folder";
+	private static final String DELETE_FOLDER = "Dissolve folder";
+	private static final String REMOVE_FROM_FOLDER = "Remove from folder";
 	static final String ENABLE_LAYOUT = "Enable layout";
 	static final String DISABLE_LAYOUT = "Disable layout";
 	static final String REMOVE_LAYOUT = "Remove-layout";
@@ -148,6 +156,12 @@ public class TabInterface
 	private static final int NEWTAB_OP_NEW_TAB = 1;
 	private static final int NEWTAB_OP_IMPORT_TAB = 2;
 	private static final int NEWTAB_OP_OPEN_TAB_MENU = 3;
+	private static final int NEWTAB_OP_NEW_FOLDER = 4;
+	private static final int TAB_OP_REMOVE_FROM_FOLDER = 10;
+	private static final int FOLDER_OP_TOGGLE = 1;
+	private static final int FOLDER_OP_CHANGE_ICON = 2;
+	private static final int FOLDER_OP_RENAME = 3;
+	private static final int FOLDER_OP_DELETE = 4;
 	private static final int TAGTAB_CHILD_OFFSET = 4;
 
 	private final Client client;
@@ -163,6 +177,21 @@ public class TabInterface
 	private final ChatboxItemSearch searchProvider;
 	private final ChatMessageManager chatMessageManager;
 	private final BankTagSyncCoordinator syncCoordinator;
+
+	private static final class StripRow
+	{
+		private final String folderId;
+		private final String tag;
+
+		private StripRow(String folderId, String tag)
+		{
+			this.folderId = folderId;
+			this.tag = tag;
+		}
+	}
+
+	private final Map<Widget, StripRow> stripRows = new IdentityHashMap<>();
+	private final List<StripRow> renderedRows = new ArrayList<>();
 
 	private boolean enabled;
 	@Getter
@@ -354,6 +383,7 @@ public class TabInterface
 		newTab.setAction(NEWTAB_OP_NEW_TAB, NEW_TAB);
 		newTab.setAction(NEWTAB_OP_IMPORT_TAB, IMPORT_TAB);
 		newTab.setAction(NEWTAB_OP_OPEN_TAB_MENU, OPEN_TAB_MENU);
+		newTab.setAction(NEWTAB_OP_NEW_FOLDER, NEW_FOLDER);
 		newTab.setOnOpListener((JavaScriptCallback) this::handleNewTab);
 
 		tabManager.clear();
@@ -505,6 +535,19 @@ public class TabInterface
 					log.debug("failed to import tab", ex);
 					sendChatMessage("Failed to import tag tab from clipboard, invalid format.");
 				}
+				break;
+			case NEWTAB_OP_NEW_FOLDER:
+				chatboxPanelManager.openTextInput("Folder name")
+					.addCharValidator(FILTERED_CHARS)
+					.onDone((Consumer<String>) name -> clientThread.invoke(() ->
+					{
+						if (!Strings.isNullOrEmpty(name))
+						{
+							syncCoordinator.createFolder(name);
+							rebuildTabs();
+						}
+					}))
+					.build();
 				break;
 			case NEWTAB_OP_OPEN_TAB_MENU:
 				client.setVarbit(VarbitID.BANK_CURRENTTAB, 0);
@@ -758,6 +801,10 @@ public class TabInterface
 				String renameTarget = Text.standardize(event.getOpbase());
 				renameTab(renameTarget);
 				break;
+			case TAB_OP_REMOVE_FROM_FOLDER:
+				syncCoordinator.moveTagToUnfiled(Text.removeTags(event.getOpbase()));
+				rebuildTabs();
+				break;
 			case TAB_OP_SYNC_USE_REMOTE:
 			{
 				final String syncTarget = Text.standardize(event.getOpbase());
@@ -964,24 +1011,27 @@ public class TabInterface
 		// is dragging widget and mouse button released
 		if (client.getMouseCurrentButton() == 0)
 		{
+			StripRow destinationRow = stripRows.get(draggedOn);
+			StripRow sourceRow = stripRows.get(draggedWidget);
 			if (!tagTabActive
 				&& draggedWidget.getId() == InterfaceID.Bankmain.ITEMS
 				&& draggedWidget.getItemId() != -1
-				&& draggedOn.getParent() == parent
-				&& draggedOn.getIndex() >= TAGTAB_CHILD_OFFSET) // skip buttons
+				&& destinationRow != null && destinationRow.tag != null)
 			{
-				// Tag an item dragged on a tag tab
-				log.debug("Dragged {} to tab {}", draggedWidget.getItemId(), Text.removeTags(draggedOn.getName()));
-				tagManager.addTag(draggedWidget.getItemId(), draggedOn.getName(), shiftDown);
-				syncCoordinator.onTagMutated(Text.removeTags(draggedOn.getName()));
+				// Tag an item dragged on a tag row. Folder headers are deliberately not tag targets.
+				log.debug("Dragged {} to tab {}", draggedWidget.getItemId(), destinationRow.tag);
+				tagManager.addTag(draggedWidget.getItemId(), destinationRow.tag, shiftDown);
+				syncCoordinator.onTagMutated(destinationRow.tag);
 				reloadActiveTab();
 			}
-			else if ((tagTabActive && draggedWidget.getId() == InterfaceID.Bankmain.ITEMS && draggedOn.getId() == InterfaceID.Bankmain.ITEMS)
-				|| (draggedWidget.getParent() == parent && draggedOn.getParent() == parent && draggedWidget.getIndex() >= TAGTAB_CHILD_OFFSET && draggedOn.getIndex() >= TAGTAB_CHILD_OFFSET))
+			else if (tagTabActive && draggedWidget.getId() == InterfaceID.Bankmain.ITEMS
+				&& draggedOn.getId() == InterfaceID.Bankmain.ITEMS)
 			{
-				// Reorder tag tabs
-				log.debug("Reorder tag tab {} <-> {}", draggedWidget, draggedOn);
 				moveTagTab(draggedWidget, draggedOn);
+			}
+			else if (sourceRow != null && destinationRow != null)
+			{
+				moveStripRow(sourceRow, destinationRow);
 			}
 			else
 			{
@@ -1037,6 +1087,128 @@ public class TabInterface
 		rebuildTagTabTab();
 	}
 
+	private void moveStripRow(StripRow source, StripRow destination)
+	{
+		if (source == destination)
+		{
+			rebuildTabs();
+			return;
+		}
+		boolean insertMode = client.getVarbitValue(VarbitID.BANK_INSERTMODE) != 0;
+		if (source.tag == null)
+		{
+			if (destination.tag != null || source.folderId.equals(destination.folderId))
+			{
+				rebuildTabs();
+				return;
+			}
+			List<String> order = new ArrayList<>();
+			for (SharedBankTagFolder folder : syncCoordinator.folders())
+			{
+				order.add(folder.getFolderId());
+			}
+			int sourceIndex = order.indexOf(source.folderId);
+			int destinationIndex = order.indexOf(destination.folderId);
+			if (sourceIndex < 0 || destinationIndex < 0)
+			{
+				rebuildTabs();
+				return;
+			}
+			if (insertMode)
+			{
+				String folderId = order.remove(sourceIndex);
+				destinationIndex = order.indexOf(destination.folderId);
+				order.add(destinationIndex, folderId);
+			}
+			else
+			{
+				String folderId = order.get(sourceIndex);
+				order.set(sourceIndex, order.get(destinationIndex));
+				order.set(destinationIndex, folderId);
+			}
+			syncCoordinator.reorderFolders(order);
+		}
+		else if (destination.tag == null)
+		{
+			syncCoordinator.moveTagToFolder(source.tag, destination.folderId);
+		}
+		else if (destination.folderId != null || source.folderId != null)
+		{
+			syncCoordinator.moveTagToFolder(source.tag, destination.folderId, destination.tag, insertMode);
+		}
+		else
+		{
+			TagTab sourceTab = tabManager.find(source.tag);
+			TagTab destinationTab = tabManager.find(destination.tag);
+			if (sourceTab != null && destinationTab != null)
+			{
+				if (insertMode)
+				{
+					tabManager.insert(sourceTab.getTag(), destinationTab.getTag());
+				}
+				else
+				{
+					tabManager.swap(sourceTab.getTag(), destinationTab.getTag());
+				}
+				tabManager.save();
+				syncCoordinator.onTabOrderChanged();
+			}
+		}
+		rebuildTabs();
+		rebuildTagTabTab();
+	}
+
+	private void opFolder(ScriptEvent event)
+	{
+		StripRow row = stripRows.get(event.getSource());
+		if (row == null || row.tag != null)
+		{
+			return;
+		}
+		SharedBankTagFolder folder = syncCoordinator.folders().stream()
+			.filter(f -> f.getFolderId().equals(row.folderId)).findFirst().orElse(null);
+		if (folder == null) return;
+		switch (event.getOp() - 1)
+		{
+			case FOLDER_OP_TOGGLE:
+				syncCoordinator.setFolderCollapsed(folder.getFolderId(),
+					!syncCoordinator.isFolderCollapsed(folder.getFolderId()));
+				rebuildTabs();
+				break;
+			case FOLDER_OP_CHANGE_ICON:
+				searchProvider.tooltipText(CHANGE_ICON + " (" + folder.getName() + ")")
+					.onItemSelected(itemId ->
+					{
+						syncCoordinator.setFolderIcon(folder.getFolderId(), itemId);
+						clientThread.invokeLater(this::rebuildTabs);
+					}).build();
+				break;
+			case FOLDER_OP_RENAME:
+				chatboxPanelManager.openTextInput("Rename folder \"" + folder.getName() + "\"")
+					.addCharValidator(FILTERED_CHARS)
+					.onDone((Consumer<String>) name -> clientThread.invoke(() ->
+					{
+						if (!Strings.isNullOrEmpty(name))
+						{
+							syncCoordinator.renameFolder(folder.getFolderId(), name);
+							rebuildTabs();
+						}
+					})).build();
+				break;
+			case FOLDER_OP_DELETE:
+				chatboxPanelManager.openTextMenuInput("Dissolve folder '" + folder.getName() + "'?")
+					.option("1. Dissolve; keep tags", () -> clientThread.invoke(() ->
+					{
+						syncCoordinator.deleteFolder(folder.getFolderId());
+						rebuildTabs();
+					}))
+					.option("2. Cancel", Runnables.doNothing()).build();
+				break;
+			default:
+				break;
+		}
+	}
+
 	private void addTabActions(TagTab tab, Widget w)
 	{
 		w.setAction(TAB_OP_OPEN_TAG, VIEW_TAB);
@@ -1049,6 +1221,8 @@ public class TabInterface
 		w.setAction(TAB_OP_EXPORT_TAB, EXPORT_TAB);
 		w.setAction(TAB_OP_RENAME_TAB, RENAME_TAB);
 		w.setAction(TAB_OP_DELETE_TAB, REMOVE_TAB);
+		w.setAction(TAB_OP_REMOVE_FROM_FOLDER,
+			syncCoordinator.folderIdForTag(tab.getTag()) == null ? null : REMOVE_FROM_FOLDER);
 		addSyncActions(tab, w);
 		w.setHasListener(true);
 		w.setOnOpListener((JavaScriptCallback) this::opTagTab);
@@ -1195,7 +1369,7 @@ public class TabInterface
 	{
 		tabScrollOffset += d;
 
-		int maxScroll = tabManager.size() - tabCount;
+		int maxScroll = Math.max(0, renderedRows.size() - tabCount);
 		if (tabScrollOffset > maxScroll)
 		{
 			tabScrollOffset = maxScroll;
@@ -1324,62 +1498,104 @@ public class TabInterface
 
 	private void rebuildTabs()
 	{
-		// remove the tag tabs but keep the buttons and scroll component
 		parent.setChildren(Arrays.copyOf(parent.getChildren(), TAGTAB_CHILD_OFFSET));
+		stripRows.clear();
+		renderedRows.clear();
 
-		var tabs = tabManager.getTabs();
-		for (TagTab tab : tabs)
+		for (SharedBankTagFolder folder : syncCoordinator.folders())
 		{
-			Widget background = createGraphic(parent, ColorUtil.wrapWithColorTag(tab.getTag(), HILIGHT_COLOR),
-				(tab.getTag().equals(activeTag) ? TabSprites.TAB_BACKGROUND_ACTIVE : TabSprites.TAB_BACKGROUND).getSpriteId(),
-				-1, TAB_WIDTH, TAB_HEIGHT, MARGIN, -1);
-			addTabActions(tab, background);
-
-			Widget icon = createGraphic(
-				parent,
-				ColorUtil.wrapWithColorTag(tab.getTag(), HILIGHT_COLOR),
-				-1,
-				tab.getIconItemId(),
-				Constants.ITEM_SPRITE_WIDTH, Constants.ITEM_SPRITE_HEIGHT,
-				MARGIN + 3, -1);
-			addTabOptions(icon);
+			addFolderRow(folder);
+			if (!syncCoordinator.isFolderCollapsed(folder.getFolderId()))
+			{
+				for (String tagId : folder.getOrderedTagIds())
+				{
+					String tag = syncCoordinator.tagNameForId(tagId);
+					TagTab tab = tag == null ? null : tabManager.find(tag);
+					if (tab != null)
+					{
+						addTagRow(tab, folder.getFolderId());
+					}
+				}
+			}
 		}
-
+		for (String tag : syncCoordinator.unfiledTags())
+		{
+			TagTab tab = tabManager.find(tag);
+			if (tab != null)
+			{
+				addTagRow(tab, null);
+			}
+		}
+		// Synchronization is optional. Before it is active, retain the original flat list.
+		if (renderedRows.isEmpty() && !tabManager.getTabs().isEmpty())
+		{
+			for (TagTab tab : tabManager.getTabs()) addTagRow(tab, null);
+		}
 		layoutTabs();
 	}
 
-	// layout the tabs for their position due to scroll or window resize
+	private void addTagRow(TagTab tab, String folderId)
+	{
+		StripRow row = new StripRow(folderId, tab.getTag());
+		renderedRows.add(row);
+		int x = folderId == null ? MARGIN : MARGIN + 6;
+		Widget background = createGraphic(parent, ColorUtil.wrapWithColorTag(tab.getTag(), HILIGHT_COLOR),
+			(tab.getTag().equals(activeTag) ? TabSprites.TAB_BACKGROUND_ACTIVE : TabSprites.TAB_BACKGROUND).getSpriteId(),
+			-1, TAB_WIDTH - (folderId == null ? 0 : 6), TAB_HEIGHT, x, -1);
+		addTabActions(tab, background);
+		Widget icon = createGraphic(parent, ColorUtil.wrapWithColorTag(tab.getTag(), HILIGHT_COLOR), -1,
+			tab.getIconItemId(), Constants.ITEM_SPRITE_WIDTH, Constants.ITEM_SPRITE_HEIGHT, x + 3, -1);
+		addTabOptions(icon);
+		stripRows.put(background, row);
+		stripRows.put(icon, row);
+	}
+
+	private void addFolderRow(SharedBankTagFolder folder)
+	{
+		StripRow row = new StripRow(folder.getFolderId(), null);
+		renderedRows.add(row);
+		Widget background = createGraphic(parent, folder.getName(), TabSprites.TAB_BACKGROUND.getSpriteId(),
+			-1, TAB_WIDTH, TAB_HEIGHT, MARGIN, -1);
+		background.setAction(FOLDER_OP_TOGGLE, TOGGLE_FOLDER);
+		background.setAction(FOLDER_OP_CHANGE_ICON, CHANGE_ICON);
+		background.setAction(FOLDER_OP_RENAME, RENAME_FOLDER);
+		background.setAction(FOLDER_OP_DELETE, DELETE_FOLDER);
+		background.setHasListener(true);
+		background.setOnOpListener((JavaScriptCallback) this::opFolder);
+		addTabOptions(background);
+		int iconItemId = folder.getIconItemId();
+		if (iconItemId == 0 && !folder.getOrderedTagIds().isEmpty())
+		{
+			String tag = syncCoordinator.tagNameForId(folder.getOrderedTagIds().get(0));
+			TagTab tab = tag == null ? null : tabManager.find(tag);
+			if (tab != null) iconItemId = tab.getIconItemId();
+		}
+		Widget icon = createGraphic(parent, folder.getName(), -1, iconItemId,
+			Constants.ITEM_SPRITE_WIDTH, Constants.ITEM_SPRITE_HEIGHT, MARGIN + 3, -1);
+		addTabOptions(icon);
+		stripRows.put(background, row);
+		stripRows.put(icon, row);
+	}
+
 	private void layoutTabs()
 	{
 		Widget[] children = parent.getChildren();
 		Widget draggedWidget = client.getDraggedWidget();
 		for (int i = TAGTAB_CHILD_OFFSET; i < children.length; ++i)
 		{
-			Widget child = children[i];
-			// avoid hiding dragged widget if scrolling from drag
-			if (draggedWidget != child)
-			{
-				child.setHidden(true);
-			}
+			if (draggedWidget != children[i]) children[i].setHidden(true);
 		}
-
-		int y = scrollComponent.getOriginalY();
-		y += MARGIN;
-
-		for (int i = tabScrollOffset;
-			i < tabScrollOffset + tabCount && i * 2 + 1 < children.length - TAGTAB_CHILD_OFFSET && children[TAGTAB_CHILD_OFFSET + i * 2] != null;
-			++i)
+		int y = scrollComponent.getOriginalY() + MARGIN;
+		for (int i = tabScrollOffset; i < tabScrollOffset + tabCount && i < renderedRows.size(); ++i)
 		{
 			Widget background = children[TAGTAB_CHILD_OFFSET + i * 2];
+			Widget icon = children[TAGTAB_CHILD_OFFSET + i * 2 + 1];
 			background.setOriginalY(y);
 			background.setHidden(false);
 			background.revalidate();
-
-			Widget icon = children[TAGTAB_CHILD_OFFSET + i * 2 + 1];
 			icon.setOriginalY(y + 4);
 			icon.setHidden(false);
 			icon.revalidate();
-
 			y += TAB_HEIGHT + MARGIN;
 		}
 	}

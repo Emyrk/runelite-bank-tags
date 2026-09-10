@@ -1,9 +1,12 @@
 package com.emyrk.banktags.sync;
 
 import com.emyrk.banktags.BankTagsConfig;
+import com.emyrk.banktags.sync.model.BankTagFolderManifest;
 import com.emyrk.banktags.sync.model.BankTagManifest;
+import com.emyrk.banktags.sync.model.FolderManifestResult;
 import com.emyrk.banktags.sync.model.ManifestResult;
 import com.emyrk.banktags.sync.model.SharedBankTag;
+import com.emyrk.banktags.sync.model.SharedBankTagFolder;
 import com.emyrk.banktags.sync.model.SyncFailure;
 import java.io.IOException;
 import java.util.List;
@@ -56,19 +59,25 @@ public class BankTagSyncClient
 	private static final String ROUTE_MANIFEST = "manifest";
 	private static final String ROUTE_TAG = "tag";
 	private static final String ROUTE_ORDER = "order";
+	private static final String ROUTE_FOLDER_MANIFEST = "folder-manifest";
+	private static final String ROUTE_FOLDER = "folder";
+	private static final String ROUTE_FOLDER_ORDER = "folder-order";
 
 	private final OkHttpClient client;
 	private final BankTagsConfig config;
 	private final BankTagSyncJson json;
+	private final BankTagFolderSyncJson folderJson;
 
 	@Inject
-	public BankTagSyncClient(OkHttpClient okHttpClient, BankTagsConfig config, BankTagSyncJson json)
+	public BankTagSyncClient(OkHttpClient okHttpClient, BankTagsConfig config, BankTagSyncJson json,
+		BankTagFolderSyncJson folderJson)
 	{
 		this.client = okHttpClient.newBuilder()
 			.callTimeout(15, TimeUnit.SECONDS)
 			.build();
 		this.config = config;
 		this.json = json;
+		this.folderJson = folderJson;
 	}
 
 	/**
@@ -160,6 +169,86 @@ public class BankTagSyncClient
 		request.header("If-Match", etag(ifMatchOrderRevision))
 			.put(RequestBody.create(JSON, json.orderRequestBody(orderedTagIds)));
 		execute(request.build(), ROUTE_ORDER, true, false, (status, body) -> json.parseManifest(body), callback);
+	}
+
+	/** {@code GET /bank-tag-folders}. */
+	public void getFolderManifest(@Nullable Long ifNoneMatchGroupRevision, Callback<FolderManifestResult> callback)
+	{
+		Request.Builder request = newRequest(callback, "bank-tag-folders");
+		if (request == null)
+		{
+			return;
+		}
+		if (ifNoneMatchGroupRevision != null)
+		{
+			request.header("If-None-Match", etag(ifNoneMatchGroupRevision));
+		}
+		executeFolder(request.get().build(), ROUTE_FOLDER_MANIFEST, false, true,
+			(status, body) -> status == 304 ? FolderManifestResult.notModified()
+				: FolderManifestResult.of(folderJson.parseManifest(body)), callback);
+	}
+
+	/** {@code GET /bank-tag-folders/{folderId}}. */
+	public void getFolder(String folderId, Callback<SharedBankTagFolder> callback)
+	{
+		Request.Builder request = newRequest(callback, "bank-tag-folders", folderId);
+		if (request != null)
+		{
+			executeFolder(request.get().build(), ROUTE_FOLDER, false, false,
+				(status, body) -> folderJson.parseFolder(body), callback);
+		}
+	}
+
+	/** {@code PUT /bank-tag-folders/{folderId}} with {@code If-None-Match: *}. */
+	public void createFolder(String folderId, SharedBankTagFolder folder, Callback<SharedBankTagFolder> callback)
+	{
+		Request.Builder request = newRequest(callback, "bank-tag-folders", folderId);
+		if (request != null)
+		{
+			request.header("If-None-Match", "*").put(RequestBody.create(JSON, folderJson.folderRequestBody(folder)));
+			executeFolder(request.build(), ROUTE_FOLDER, false, false,
+				(status, body) -> folderJson.parseFolder(body), callback);
+		}
+	}
+
+	/** {@code PUT /bank-tag-folders/{folderId}} with {@code If-Match: "<rev>"}. */
+	public void updateFolder(String folderId, long ifMatchRevision, SharedBankTagFolder folder,
+		Callback<SharedBankTagFolder> callback)
+	{
+		Request.Builder request = newRequest(callback, "bank-tag-folders", folderId);
+		if (request != null)
+		{
+			request.header("If-Match", etag(ifMatchRevision))
+				.put(RequestBody.create(JSON, folderJson.folderRequestBody(folder)));
+			executeFolder(request.build(), ROUTE_FOLDER, false, false,
+				(status, body) -> folderJson.parseFolder(body), callback);
+		}
+	}
+
+	/** {@code DELETE /bank-tag-folders/{folderId}} with {@code If-Match: "<rev>"}. */
+	public void deleteFolder(String folderId, long ifMatchRevision, Callback<SharedBankTagFolder> callback)
+	{
+		Request.Builder request = newRequest(callback, "bank-tag-folders", folderId);
+		if (request != null)
+		{
+			request.header("If-Match", etag(ifMatchRevision)).delete();
+			executeFolder(request.build(), ROUTE_FOLDER, false, false,
+				(status, body) -> folderJson.parseFolder(body), callback);
+		}
+	}
+
+	/** {@code PUT /bank-tag-folder-order} with {@code If-Match: "<orderRevision>"}. */
+	public void putFolderOrder(long ifMatchOrderRevision, List<String> orderedFolderIds,
+		Callback<BankTagFolderManifest> callback)
+	{
+		Request.Builder request = newRequest(callback, "bank-folder-order");
+		if (request != null)
+		{
+			request.header("If-Match", etag(ifMatchOrderRevision))
+				.put(RequestBody.create(JSON, folderJson.folderOrderRequestBody(orderedFolderIds)));
+			executeFolder(request.build(), ROUTE_FOLDER_ORDER, true, false,
+				(status, body) -> folderJson.parseManifest(body), callback);
+		}
 	}
 
 	/**
@@ -294,6 +383,52 @@ public class BankTagSyncClient
 					return;
 				}
 				callback.onSuccess(value);
+			}
+		});
+	}
+
+	private <T> void executeFolder(Request request, String routeTemplate, boolean orderRoute, boolean allowNotModified,
+		BodyParser<T> parser, Callback<T> callback)
+	{
+		client.newCall(request).enqueue(new okhttp3.Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException ex)
+			{
+				log.debug("bank tag folder sync {} {} -> {}", request.method(), routeTemplate, ex.getClass().getSimpleName());
+				callback.onFailure(SyncFailure.network(ex.getMessage()));
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				int status = response.code();
+				String body;
+				try (Response ignored = response)
+				{
+					ResponseBody responseBody = response.body();
+					body = responseBody == null ? "" : responseBody.string();
+				}
+				catch (IOException ex)
+				{
+					callback.onFailure(SyncFailure.network(ex.getMessage()));
+					return;
+				}
+				boolean success = response2xx(status) || (allowNotModified && status == 304);
+				if (!success)
+				{
+					callback.onFailure(folderJson.parseErrorBody(status, body, orderRoute));
+					return;
+				}
+				try
+				{
+					callback.onSuccess(parser.parse(status, body));
+				}
+				catch (BankTagSyncJson.UnsupportedSchemaException | BankTagSyncJson.InvalidDocumentException
+					| RuntimeException ex)
+				{
+					callback.onFailure(SyncFailure.invalidResponse(ex.getMessage()));
+				}
 			}
 		});
 	}

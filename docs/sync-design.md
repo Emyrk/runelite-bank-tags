@@ -17,6 +17,18 @@ The initial shared-data candidates are:
 
 The plugin should continue to work from an isolated synchronized RuneLite configuration cache when offline. Remote synchronization must never overwrite the built-in `banktags` group or the existing `emyrk-bank-tags` local data.
 
+## Synchronized folders
+
+The shared organization also includes optional one-level folders. A folder synchronizes its stable UUID, name, icon item ID, ordered child tag UUIDs, revision, deletion state, and timestamp through the separate folder extension in `docs/remote-sync-protocol.md`.
+
+- Nested folders are not supported.
+- A live tag belongs to at most one live folder and may remain unfiled.
+- Existing tags start unfiled. Migration never invents folders.
+- Deleting a folder preserves its tags and makes them unfiled.
+- Deleting a tag removes it from its owning folder.
+- Folder order and child order synchronize. Expanded or collapsed state stays local to each browser or RuneLite profile.
+- Folder revisions and manifest revisions are independent from the frozen tag v1 protocol.
+
 ## Non-goals
 
 - Synchronizing actual bank contents or quantities.

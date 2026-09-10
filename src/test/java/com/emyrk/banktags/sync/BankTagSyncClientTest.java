@@ -53,7 +53,8 @@ public class BankTagSyncClientTest
 		when(config.serverBaseUrl()).thenReturn(server.url("/").toString());
 		when(config.groupName()).thenReturn("gim");
 		when(config.groupToken()).thenReturn("tok-123");
-		client = new BankTagSyncClient(new OkHttpClient(), config, new BankTagSyncJson(new Gson()));
+		client = new BankTagSyncClient(new OkHttpClient(), config, new BankTagSyncJson(new Gson()),
+			new BankTagFolderSyncJson(new Gson()));
 	}
 
 	@After

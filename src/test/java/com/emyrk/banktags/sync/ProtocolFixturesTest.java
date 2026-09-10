@@ -183,6 +183,44 @@ public class ProtocolFixturesTest
 		assertEquals(TAG_JSON_CONTENT_HASH, tag.contentHash());
 	}
 
+	@Test
+	public void testFolderExtensionFixturesMatchProtocol()
+	{
+		Path folderDir = Paths.get("src", "test", "resources", "fixtures", "sync", "folders", "v1");
+		JsonObject folder = readObject(folderDir.resolve("folder.json"));
+		assertEquals(1, folder.get("schemaVersion").getAsInt());
+		assertEquals(952, folder.get("iconItemId").getAsInt());
+		assertEquals(2, folder.getAsJsonArray("orderedTagIds").size());
+		assertFalse(folder.get("deleted").getAsBoolean());
+
+		JsonObject manifest = readObject(folderDir.resolve("manifest.json"));
+		assertEquals(9, manifest.get("groupRevision").getAsLong());
+		assertEquals(2, manifest.get("orderRevision").getAsLong());
+		assertEquals(1, manifest.getAsJsonArray("orderedFolderIds").size());
+		assertEquals(1, manifest.getAsJsonArray("folders").size());
+
+		JsonObject tombstone = readObject(folderDir.resolve("folder-tombstone.json"));
+		assertTrue(tombstone.get("deleted").getAsBoolean());
+		assertEquals(0, tombstone.getAsJsonArray("orderedTagIds").size());
+
+		JsonObject order = readObject(folderDir.resolve("order-request.json"));
+		assertEquals(manifest.getAsJsonArray("orderedFolderIds"), order.getAsJsonArray("orderedFolderIds"));
+	}
+
+	private JsonObject readObject(Path file)
+	{
+		try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8))
+		{
+			JsonElement element = gson.fromJson(reader, JsonElement.class);
+			assertTrue("fixture is not a JSON object: " + file, element != null && element.isJsonObject());
+			return element.getAsJsonObject();
+		}
+		catch (IOException ex)
+		{
+			throw new AssertionError("unable to read fixture " + file, ex);
+		}
+	}
+
 	private JsonObject object(String file)
 	{
 		JsonElement element = fixtures.get(file);
