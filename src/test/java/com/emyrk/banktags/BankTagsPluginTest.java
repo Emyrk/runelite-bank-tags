@@ -131,9 +131,10 @@ public class BankTagsPluginTest
 	}
 
 	@Test
-	public void testConflictsWithBuiltInBankTags()
+	public void testUsesIndependentToggleAndConflictsWithBuiltInBankTags()
 	{
 		PluginDescriptor descriptor = BankTagsPlugin.class.getAnnotation(PluginDescriptor.class);
+		assertEquals("bankTagsExtended", descriptor.configName());
 		assertArrayEquals(new String[]{"Bank Tags"}, descriptor.conflicts());
 	}
 

@@ -75,6 +75,7 @@ import net.runelite.client.util.Text;
 
 @PluginDescriptor(
 	name = "Bank Tags Extended",
+	configName = "bankTagsExtended",
 	description = "A standalone replacement for RuneLite bank tags",
 	tags = {"searching", "tagging"},
 	conflicts = {"Bank Tags"}
