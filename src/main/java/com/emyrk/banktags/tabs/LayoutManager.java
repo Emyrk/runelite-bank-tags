@@ -83,6 +83,7 @@ import static com.emyrk.banktags.BankTagsPlugin.BANK_ITEM_WIDTH;
 import static com.emyrk.banktags.BankTagsPlugin.BANK_ITEM_X_PADDING;
 import static com.emyrk.banktags.BankTagsPlugin.BANK_ITEM_Y_PADDING;
 import com.emyrk.banktags.BankTagsStorage;
+import com.emyrk.banktags.TagManager;
 import static com.emyrk.banktags.BankTagsPlugin.TAG_LAYOUT_PREFIX;
 import com.emyrk.banktags.BankTagsService;
 import com.emyrk.banktags.sync.BankTagSyncCoordinator;
@@ -103,6 +104,7 @@ public class LayoutManager
 	private final PotionStorage potionStorage;
 	private final EventBus eventBus;
 	private final BankTagsStorage storage;
+	private final TagManager tagManager;
 	private final ClientThread clientThread;
 	// Provider: LayoutManager -> coordinator -> snapshot service -> LayoutManager would otherwise be a constructor cycle.
 	private final Provider<BankTagSyncCoordinator> syncCoordinator;
@@ -112,7 +114,7 @@ public class LayoutManager
 	@Inject
 	LayoutManager(Client client, ItemManager itemManager, BankTagsPlugin plugin, ChatboxPanelManager chatboxPanelManager,
 		BankSearch bankSearch, ChatMessageManager chatMessageManager,
-		PotionStorage potionStorage, EventBus eventBus, BankTagsStorage storage,
+		PotionStorage potionStorage, EventBus eventBus, BankTagsStorage storage, TagManager tagManager,
 		ClientThread clientThread, Provider<BankTagSyncCoordinator> syncCoordinator)
 	{
 		this.client = client;
@@ -124,6 +126,7 @@ public class LayoutManager
 		this.potionStorage = potionStorage;
 		this.eventBus = eventBus;
 		this.storage = storage;
+		this.tagManager = tagManager;
 		this.clientThread = clientThread;
 		this.syncCoordinator = syncCoordinator;
 
@@ -304,9 +307,17 @@ public class LayoutManager
 
 		int insertionSlot = (plugin.getOptions() & BankTagsService.OPTION_ITEMS_NOT_IN_LAYOUT_AT_BOTTOM) != 0 ? l.lastItemIndex() : -1;
 		boolean modified = false;
-		// Items from the bank but not in the layout.
+		// Items from the bank but not in the layout. Bank redraws can briefly expose unrelated
+		// items, so never persist an item unless it belongs to this tag.
+		Set<Integer> taggedItems = new LinkedHashSet<>(tagManager.getItemsForTag(l.getTag()));
 		for (int itemId : bankItems)
 		{
+			int canonicalId = itemManager.canonicalize(itemId);
+			if (!belongsToTag(taggedItems, itemId, canonicalId, ItemVariationMapping.map(itemId)))
+			{
+				continue;
+			}
+
 			do
 			{
 				++insertionSlot;
@@ -329,8 +340,7 @@ public class LayoutManager
 					def.getPlaceholderTemplateId() > -1 && def.getPlaceholderId() > -1 ? " (placeholder)" : "");
 			}
 
-			int layoutItemId = itemManager.canonicalize(itemId);
-			l.addItemAfter(layoutItemId, insertionSlot);
+			l.addItemAfter(canonicalId, insertionSlot);
 			modified = true;
 		}
 
@@ -358,6 +368,12 @@ public class LayoutManager
 			saveLayout(l);
 			syncCoordinator.get().onTagMutated(l.getTag());
 		}
+	}
+
+	static boolean belongsToTag(Set<Integer> taggedItems, int itemId, int canonicalId, int variationBaseId)
+	{
+		return taggedItems.contains(itemId) || taggedItems.contains(canonicalId)
+			|| taggedItems.contains(-variationBaseId);
 	}
 
 	// mostly from ~bankmain_drawitem
