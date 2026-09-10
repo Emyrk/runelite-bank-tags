@@ -41,7 +41,9 @@ import net.runelite.client.game.ItemManager;
 import static com.emyrk.banktags.BankTagsPlugin.ITEM_KEY_PREFIX;
 import com.emyrk.banktags.sync.BankTagSyncCoordinator;
 import com.emyrk.banktags.tabs.TabInterface;
+import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.cluescrolls.ClueScrollService;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import java.util.Arrays;
@@ -126,6 +128,13 @@ public class BankTagsPluginTest
 		when(itemManager.canonicalize(ItemID.ABYSSAL_WHIP)).thenReturn(ItemID.ABYSSAL_WHIP);
 		when(client.getIntStackSize()).thenReturn(2);
 		when(client.getObjectStackSize()).thenReturn(1);
+	}
+
+	@Test
+	public void testConflictsWithBuiltInBankTags()
+	{
+		PluginDescriptor descriptor = BankTagsPlugin.class.getAnnotation(PluginDescriptor.class);
+		assertArrayEquals(new String[]{"Bank Tags"}, descriptor.conflicts());
 	}
 
 	@Test
