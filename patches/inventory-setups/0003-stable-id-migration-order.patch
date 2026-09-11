@@ -1,0 +1,23 @@
+--- a/inventorysetups/InventorySetupsPersistentDataManager.java
++++ b/inventorysetups/InventorySetupsPersistentDataManager.java
+@@ -133,15 +133,17 @@
+ 				configManager.setConfiguration(CONFIG_GROUP, CONFIG_KEY_SETUPS_V3_PREFIX + hash, data);
+ 			}
+ 
++			// Publish the rewritten UUID order before removing legacy hash-keyed documents. If migration is
++			// interrupted, loadV3Setups can still recover either the old or new documents.
++			final String setupsOrderJson = gson.toJson(setupsOrder);
++			configManager.setConfiguration(CONFIG_GROUP, CONFIG_KEY_SETUPS_ORDER_V3, setupsOrderJson);
++
+ 			for (final String removedSetupHash : oldSetupHashes)
+ 			{
+ 				// Any hashes still in the oldSetupHashes set were for setups that were either renamed (and saved to a new hash above) or deleted.
+ 				configManager.unsetConfiguration(CONFIG_GROUP, CONFIG_KEY_SETUPS_V3_PREFIX + removedSetupHash);
+ 			}
+ 
+-			final String setupsOrderJson = gson.toJson(setupsOrder);
+-			configManager.setConfiguration(CONFIG_GROUP, CONFIG_KEY_SETUPS_ORDER_V3, setupsOrderJson);
+-
+ 			// Setups were just persisted; notify integrating plugins.
+ 			plugin.broadcastSetupsChanged();
+ 		}

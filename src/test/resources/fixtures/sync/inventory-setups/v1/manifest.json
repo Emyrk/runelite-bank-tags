@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "groupRevision": 42,
+  "setupOrderRevision": 4,
+  "sectionOrderRevision": 2,
+  "orderedSetupIds": ["5e4a8e36-e5f4-4daa-ae7a-e510f3e66721"],
+  "orderedSectionIds": ["a8691e24-56a0-4fb7-bfd1-04feca5b449a"],
+  "setups": [{"setupId":"5e4a8e36-e5f4-4daa-ae7a-e510f3e66721","name":"Cerberus","revision":7,"deleted":false}],
+  "sections": [{"sectionId":"a8691e24-56a0-4fb7-bfd1-04feca5b449a","name":"Slayer","revision":3,"deleted":false}]
+}

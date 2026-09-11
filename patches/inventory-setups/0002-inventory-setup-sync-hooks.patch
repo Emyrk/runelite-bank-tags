@@ -1,0 +1,215 @@
+diff -ruN a/inventorysetups/InventorySetup.java b/inventorysetups/InventorySetup.java
+--- a/inventorysetups/InventorySetup.java	2026-09-11 13:04:03.190836825 -0500
++++ b/inventorysetups/InventorySetup.java	2026-09-11 13:04:03.232306282 -0500
+@@ -28,14 +28,42 @@
+ import java.util.ArrayList;
+ import java.util.List;
+ import java.util.Map;
+-import lombok.AllArgsConstructor;
+ import lombok.Getter;
+ import lombok.Setter;
+ 
+-@AllArgsConstructor
+ public class InventorySetup implements InventorySetupsDisplayAttributes
+ {
+ 	@Getter
++	@Setter
++	private String syncId;
++
++	public InventorySetup(List<InventorySetupsItem> inventory, List<InventorySetupsItem> equipment,
++		List<InventorySetupsItem> rune_pouch, List<InventorySetupsItem> boltPouch,
++		List<InventorySetupsItem> quiver, Map<Integer, InventorySetupsItem> additionalFilteredItems,
++		String name, String notes, Color highlightColor, boolean highlightDifference,
++		Color displayColor, boolean filterBank, boolean unorderedHighlight, int spellBook,
++		boolean favorite, int iconID, String attackOption)
++	{
++		this.inventory = inventory;
++		this.equipment = equipment;
++		this.rune_pouch = rune_pouch;
++		this.boltPouch = boltPouch;
++		this.quiver = quiver;
++		this.additionalFilteredItems = additionalFilteredItems;
++		this.name = name;
++		this.notes = notes;
++		this.highlightColor = highlightColor;
++		this.highlightDifference = highlightDifference;
++		this.displayColor = displayColor;
++		this.filterBank = filterBank;
++		this.unorderedHighlight = unorderedHighlight;
++		this.spellBook = spellBook;
++		this.favorite = favorite;
++		this.iconID = iconID;
++		this.attackOption = attackOption;
++	}
++
++	@Getter
+ 	private List<InventorySetupsItem> inventory;
+ 
+ 	@Getter
+diff -ruN a/inventorysetups/InventorySetupsPersistentDataManager.java b/inventorysetups/InventorySetupsPersistentDataManager.java
+--- a/inventorysetups/InventorySetupsPersistentDataManager.java	2026-09-11 13:04:03.214309276 -0500
++++ b/inventorysetups/InventorySetupsPersistentDataManager.java	2026-09-11 13:04:03.233106535 -0500
+@@ -11,6 +11,7 @@
+ import inventorysetups.serialization.InventorySetupItemSerializableTypeAdapter;
+ import inventorysetups.serialization.InventorySetupSerializable;
+ import inventorysetups.serialization.LongTypeAdapter;
++import com.emyrk.banktags.inventorysync.InventorySetupIds;
+ import joptsimple.internal.Strings;
+ import lombok.extern.slf4j.Slf4j;
+ import net.runelite.client.config.ConfigManager;
+@@ -93,6 +94,7 @@
+ 
+ 		}.getType();
+ 		sections.addAll(loadData(CONFIG_KEY_SECTIONS, sectionType));
++		final boolean assignedStableIds = InventorySetupIds.ensureStableIds(inventorySetups, sections);
+ 		for (final InventorySetupsSection section : sections)
+ 		{
+ 			// Remove any duplicates that exist
+@@ -103,6 +105,10 @@
+ 			section.getSetups().removeIf(s -> !cache.getInventorySetupNames().containsKey(s));
+ 			cache.addSection(section);
+ 		}
++		if (assignedStableIds)
++		{
++			updateConfig(true, true);
++		}
+ 	}
+ 
+ 	public void updateConfig(boolean updateSetups, boolean updateSections)
+@@ -120,7 +126,7 @@
+ 			final List<String> setupsOrder = new ArrayList<>();
+ 			for (final InventorySetup setup : inventorySetups)
+ 			{
+-				final String hash = hashFunction.hashUnencodedChars(setup.getName()).toString();
++				final String hash = InventorySetupIds.requireStableId(setup);
+ 				setupsOrder.add(hash);
+ 				oldSetupHashes.remove(hash);
+ 				final String data = gson.toJson(InventorySetupSerializable.convertFromInventorySetup(setup));
+@@ -146,6 +152,10 @@
+ 			configManager.setConfiguration(CONFIG_GROUP, CONFIG_KEY_SECTIONS, jsonSections);
+ 		}
+ 
++		if (updateSetups || updateSections)
++		{
++			plugin.inventorySetupSyncChanged(updateSetups, updateSections);
++		}
+ 	}
+ 
+ 	private <T> List<T> loadData(final String configKey, Type type)
+diff -ruN a/inventorysetups/InventorySetupsPlugin.java b/inventorysetups/InventorySetupsPlugin.java
+--- a/inventorysetups/InventorySetupsPlugin.java	2026-09-11 13:04:03.214432150 -0500
++++ b/inventorysetups/InventorySetupsPlugin.java	2026-09-11 13:04:03.234242548 -0500
+@@ -24,6 +24,8 @@
+  */
+ package inventorysetups;
+ 
++import com.emyrk.banktags.inventorysync.InventorySetupSyncCoordinator;
++
+ import com.google.gson.Gson;
+ import com.google.gson.reflect.TypeToken;
+ import com.google.inject.Provides;
+@@ -215,6 +217,9 @@
+ 	private Gson gson;
+ 
+ 	@Inject
++	private InventorySetupSyncCoordinator inventorySetupSyncCoordinator;
++
++	@Inject
+ 	private PluginManager pluginManager;
+ 
+ 	@Inject
+@@ -391,6 +396,7 @@
+ 			clientThread.invokeLater(() ->
+ 			{
+ 				dataManager.loadConfig();
++				inventorySetupSyncCoordinator.start(this);
+ 				handleRegistrationOfHotkeys();
+ 				broadcastSetupsChanged();
+ 				SwingUtilities.invokeLater(() -> panel.redrawOverviewPanel(true));
+@@ -404,6 +410,7 @@
+ 	@Override
+ 	public void shutDown()
+ 	{
++		inventorySetupSyncCoordinator.stop();
+ 		resetBankSearch();
+ 		clientToolbar.removeNavigation(navButton);
+ 	}
+@@ -514,6 +521,13 @@
+ 	@Subscribe
+ 	public void onConfigChanged(ConfigChanged event)
+ 	{
++		if ("emyrk-bank-tags-sync-settings".equals(event.getGroup()) &&
++			("inventorySetupsEnabled".equals(event.getKey()) || "groupName".equals(event.getKey()) ||
++				"groupToken".equals(event.getKey()) || "serverBaseUrl".equals(event.getKey()) ||
++				"pollIntervalSeconds".equals(event.getKey()) || "uploadDebounceSeconds".equals(event.getKey())))
++		{
++			inventorySetupSyncCoordinator.start(this);
++		}
+ 		if (event.getGroup().equals(CONFIG_GROUP))
+ 		{
+ 			if (event.getKey().equals(CONFIG_KEY_PANEL_VIEW) || event.getKey().equals(CONFIG_KEY_SECTION_MODE) ||
+@@ -2666,6 +2680,18 @@
+ 		// config will already be updated by caller so no need to update it here
+ 	}
+ 
++	public void inventorySetupSyncChanged(boolean setupsChanged, boolean sectionsChanged)
++	{
++		inventorySetupSyncCoordinator.onLocalMutation(setupsChanged, sectionsChanged);
++	}
++
++	public void reloadInventorySetupSyncState()
++	{
++		dataManager.loadConfig();
++		broadcastSetupsChanged();
++		SwingUtilities.invokeLater(() -> panel.redrawOverviewPanel(true));
++	}
++
+ 	// Called by the data manager whenever setups are persisted; the handler decides whether a broadcast
+ 	// is actually needed.
+ 	public void broadcastSetupsChanged()
+diff -ruN a/inventorysetups/InventorySetupsSection.java b/inventorysetups/InventorySetupsSection.java
+--- a/inventorysetups/InventorySetupsSection.java	2026-09-11 13:04:03.187710853 -0500
++++ b/inventorysetups/InventorySetupsSection.java	2026-09-11 13:04:03.232397355 -0500
+@@ -21,6 +21,10 @@
+ 
+ 	@Getter
+ 	@Setter
++	private String syncId;
++
++	@Getter
++	@Setter
+ 	private String name;
+ 
+ 	// The list of setups
+diff -ruN a/inventorysetups/serialization/InventorySetupSerializable.java b/inventorysetups/serialization/InventorySetupSerializable.java
+--- a/inventorysetups/serialization/InventorySetupSerializable.java	2026-09-11 13:04:03.211529513 -0500
++++ b/inventorysetups/serialization/InventorySetupSerializable.java	2026-09-11 13:04:03.232667550 -0500
+@@ -46,6 +46,8 @@
+ 	Integer iId;	// iconID (null = default item ID for icon view)
+ 	@Nullable
+ 	String ao;		// Attack option e.g., "Chop", "Pound", "Block". (null = No saved option)
++	@Nullable
++	String sid;	// Stable synchronization UUID (null for legacy v3 data)
+ 
+ 	static public InventorySetupSerializable convertFromInventorySetup(final InventorySetup inventorySetup)
+ 	{
+@@ -78,7 +80,7 @@
+ 		Integer iId = inventorySetup.getIconID() > 0 ? inventorySetup.getIconID() : null;
+ 		String ao = !Strings.isNullOrEmpty(inventorySetup.getAttackOption()) ? inventorySetup.getAttackOption() : null;
+ 
+-		return new InventorySetupSerializable(inv, eq, rp, bp, qv, afi, name, notes, hc, hd, dc, fb, uh, sb, fv, iId, ao);
++		return new InventorySetupSerializable(inv, eq, rp, bp, qv, afi, name, notes, hc, hd, dc, fb, uh, sb, fv, iId, ao, inventorySetup.getSyncId());
+ 	}
+ 
+ 	static private List<InventorySetupItemSerializable> convertListFromInventorySetup(final List<InventorySetupsItem> items)
+@@ -139,7 +141,9 @@
+ 		int iId = iss.getIId() != null ? iss.getIId() : -1;
+ 		String ao = iss.getAo() != null ? iss.getAo() : "";
+ 
+-		return new InventorySetup(inv, eq, rp, bp, qv, afi, name, notes, hc, hd, dc, fb, uh, sb, fv, iId, ao);
++		InventorySetup setup = new InventorySetup(inv, eq, rp, bp, qv, afi, name, notes, hc, hd, dc, fb, uh, sb, fv, iId, ao);
++		setup.setSyncId(iss.getSid());
++		return setup;
+ 	}
+ 
+ 

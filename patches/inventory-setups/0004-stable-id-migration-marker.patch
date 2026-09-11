@@ -1,0 +1,73 @@
+--- a/inventorysetups/InventorySetupsPersistentDataManager.java	2026-09-11 14:00:31.296209048 -0500
++++ b/inventorysetups/InventorySetupsPersistentDataManager.java	2026-09-11 14:00:31.316896870 -0500
+@@ -54,6 +54,7 @@
+ 	public static final String CONFIG_KEY_SETUPS_V2 = "setupsV2";
+ 	public static final String CONFIG_KEY_SETUPS_V3_PREFIX = "setupsV3_";
+ 	public static final String CONFIG_KEY_SETUPS_ORDER_V3 = "setupsOrderV3_";
++	public static final String CONFIG_KEY_STABLE_ID_MIGRATION = "setupsStableIdMigration";
+ 	public static final String CONFIG_KEY_SECTIONS = "sections";
+ 
+ 	@Inject
+@@ -84,7 +85,9 @@
+ 		// Handles migration of old setup data
+ 		handleMigrationOfOldData();
+ 
+-		final List<InventorySetup> setupsFromConfig = loadV3Setups();
++		final boolean stableIdMigrationInProgress = Boolean.parseBoolean(
++			configManager.getConfiguration(CONFIG_GROUP, CONFIG_KEY_STABLE_ID_MIGRATION));
++		final List<InventorySetup> setupsFromConfig = loadV3Setups(stableIdMigrationInProgress);
+ 		inventorySetups.addAll(setupsFromConfig);
+ 		processSetupsFromConfig();
+ 
+@@ -107,7 +110,14 @@
+ 		}
+ 		if (assignedStableIds)
+ 		{
++			configManager.setConfiguration(CONFIG_GROUP, CONFIG_KEY_STABLE_ID_MIGRATION, true);
+ 			updateConfig(true, true);
++			configManager.unsetConfiguration(CONFIG_GROUP, CONFIG_KEY_STABLE_ID_MIGRATION);
++		}
++		else if (stableIdMigrationInProgress)
++		{
++			// A prior rewrite reached a self-consistent order. Loading it successfully completes recovery.
++			configManager.unsetConfiguration(CONFIG_GROUP, CONFIG_KEY_STABLE_ID_MIGRATION);
+ 		}
+ 	}
+ 
+@@ -220,7 +230,7 @@
+ 		}
+ 	}
+ 
+-	private List<InventorySetup> loadV3Setups()
++	private List<InventorySetup> loadV3Setups(boolean stableIdMigrationInProgress)
+ 	{
+ 		final String wholePrefix = ConfigManager.getWholeKey(CONFIG_GROUP, null, CONFIG_KEY_SETUPS_V3_PREFIX);
+ 		final List<String> loadedSetupWholeKeys = configManager.getConfigurationKeys(wholePrefix);
+@@ -240,21 +250,14 @@
+ 		}
+ 
+ 		List<InventorySetup> loadedSetups = new ArrayList<>();
+-		for (final String configHash : setupsOrder)
++		for (final String configKey : InventorySetupIds.setupKeysForLoad(setupsOrder, loadedSetupKeys,
++			CONFIG_KEY_SETUPS_V3_PREFIX, stableIdMigrationInProgress))
+ 		{
+-			final String configKey = CONFIG_KEY_SETUPS_V3_PREFIX + configHash;
+-			if (loadedSetupKeys.remove(configKey))
+-			{ // Handles if hash is present only in configOrder.
+-				final InventorySetup setup = loadV3Setup(configKey);
+-				loadedSetups.add(setup);
++			if (!setupsOrder.contains(configKey.substring(CONFIG_KEY_SETUPS_V3_PREFIX.length())))
++			{
++				log.info("Loading setup that was missing from Order key: " + configKey);
+ 			}
+-		}
+-		for (final String configKey : loadedSetupKeys)
+-		{
+-			// Load any remaining setups not present in setupsOrder. Useful if updateConfig crashes midway.
+-			log.info("Loading setup that was missing from Order key: " + configKey);
+-			final InventorySetup setup = loadV3Setup(configKey);
+-			loadedSetups.add(setup);
++			loadedSetups.add(loadV3Setup(configKey));
+ 		}
+ 		return loadedSetups;
+ 	}

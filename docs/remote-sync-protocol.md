@@ -210,3 +210,28 @@ Decision table on a write response:
 Conflict recovery actions: `Use remote version` (apply `syncConflict_.remote`, clear conflict, store its revision) and `Overwrite remote version` (confirm, then `PUT` with `If-Match: "<current remote revision>"` from the conflict record; when the remote is a tombstone the client does not resurrect the id but mints a fresh `tagId` and creates it with `If-None-Match: *`, forgetting the old id). `Retry sync` re-runs the pending write for that tag with its stored revision and triggers an immediate manifest poll.
 
 First enable (no `syncStorageInitialized` marker): `GET /bank-tags`. On `401` stop with status `invalid credentials`. If the manifest has any non-deleted tag: fetch each, apply into the sync namespace, write metadata, set the marker, then reload the bank UI. Otherwise: `initializeSyncStorageFromLocal()`, set the marker, mint a UUID per local tab, write `syncTag_` with `revision: 0` and `baseHash: ""`, and enqueue a create for each. Either way `emyrk-bank-tags` and `banktags` are never written.
+
+#### Inventory Setups extension (v1)
+
+Inventory Setups synchronization is an independent, opt-in subprotocol under the same authenticated group scope. Setup and section UUIDs are lowercase UUID v4 values minted and persisted by the RuneLite client. Rename operations never change an ID.
+
+A setup document contains `schemaVersion`, `setupId`, `name`, `notes`, `payload`, `revision`, and `deleted`. `payload` is the complete Inventory Setups v3 serialized setup excluding the duplicated `name`, `notes`, and local `sid` fields. It therefore carries inventory, equipment, rune pouch, bolt pouch, quiver, additional filtered items, colors, highlighting and bank-filter flags, spellbook, favorite, icon, and attack option. Notes are shared. Request bodies omit server-managed `revision` and `deleted`.
+
+A section document contains `schemaVersion`, `sectionId`, `name`, nullable `displayColor`, `orderedSetupIds`, `revision`, and `deleted`. `orderedSetupIds` is ordered and unique within that section. A setup may occur in more than one section. `isMaximized` is local-only and is preserved by `sectionId` when a remote document is applied.
+
+Setup and section manifests have independent `groupRevision` and `orderRevision` values. Their global order arrays contain every live ID exactly once. Documents use optimistic conditional writes and retained tombstones exactly like bank tags. Deleting a setup removes its ID from every section. Deleting a section preserves all setups.
+
+| Method | Path | Conditional header | Success body |
+| --- | --- | --- | --- |
+| `GET` | `/inventory-setups` | optional `If-None-Match: "<groupRevision>"` | setup manifest, or `304` |
+| `GET` | `/inventory-setups/{setup_id}` | none | setup document |
+| `PUT` | `/inventory-setups/{setup_id}` | `If-None-Match: *` or `If-Match: "<revision>"` | setup document |
+| `DELETE` | `/inventory-setups/{setup_id}` | `If-Match: "<revision>"` | setup tombstone |
+| `PUT` | `/inventory-setup-order` | `If-Match: "<orderRevision>"` | setup manifest |
+| `GET` | `/inventory-setup-sections` | optional `If-None-Match: "<groupRevision>"` | section manifest, or `304` |
+| `GET` | `/inventory-setup-sections/{section_id}` | none | section document |
+| `PUT` | `/inventory-setup-sections/{section_id}` | `If-None-Match: *` or `If-Match: "<revision>"` | section document |
+| `DELETE` | `/inventory-setup-sections/{section_id}` | `If-Match: "<revision>"` | section tombstone |
+| `PUT` | `/inventory-setup-section-order` | `If-Match: "<orderRevision>"` | section manifest |
+
+The normative examples are under `src/test/resources/fixtures/sync/inventory-setups/v1/`. The synchronized cache and revision metadata use `emyrk-bank-tags-sync`. Inventory Setups' existing `inventorysetups` configuration remains the offline local cache and source rendered by the bundled plugin.

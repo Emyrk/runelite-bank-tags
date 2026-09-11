@@ -22,11 +22,24 @@ public interface BankTagsSyncConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "inventorySetupsEnabled",
+		name = "Sync Inventory Setups",
+		description = "Synchronize Inventory Setups and sections using the same group credentials.",
+		warning = "This feature submits your IP address to a 3rd-party server not controlled or verified by RuneLite developers",
+		section = BankTagsConfig.SYNC_SECTION,
+		position = 12
+	)
+	default boolean inventorySetupsEnabled()
+	{
+		return false;
+	}
+
+	@ConfigItem(
 		keyName = "groupName",
 		name = "Group name",
 		description = "The private group name configured on the synchronization server.",
 		section = BankTagsConfig.SYNC_SECTION,
-		position = 12
+		position = 13
 	)
 	default String groupName()
 	{
@@ -39,7 +52,7 @@ public interface BankTagsSyncConfig extends Config
 		description = "The authorization token for the group.",
 		secret = true,
 		section = BankTagsConfig.SYNC_SECTION,
-		position = 13
+		position = 14
 	)
 	default String groupToken()
 	{
@@ -51,7 +64,7 @@ public interface BankTagsSyncConfig extends Config
 		name = "Server URL override",
 		description = "Leave blank to use https://ironman.masley.com.",
 		section = BankTagsConfig.SYNC_SECTION,
-		position = 14
+		position = 15
 	)
 	default String serverBaseUrl()
 	{
@@ -64,7 +77,7 @@ public interface BankTagsSyncConfig extends Config
 		name = "Poll interval",
 		description = "Seconds between checks for remote tag changes.",
 		section = BankTagsConfig.SYNC_SECTION,
-		position = 15
+		position = 16
 	)
 	default int pollIntervalSeconds()
 	{
@@ -77,7 +90,7 @@ public interface BankTagsSyncConfig extends Config
 		name = "Upload debounce",
 		description = "Seconds to wait for a tag mutation to finish before uploading it.",
 		section = BankTagsConfig.SYNC_SECTION,
-		position = 16
+		position = 17
 	)
 	default int uploadDebounceSeconds()
 	{
@@ -93,7 +106,7 @@ public interface BankTagsSyncConfig extends Config
 		description = "Deletes the local copy of synchronized tags and reloads them from the server. Your pre-sync local tags are not touched. Tick to run once.",
 		warning = "This deletes the local synchronized cache. Unsynced local changes to synchronized tags are lost.",
 		section = BankTagsConfig.SYNC_SECTION,
-		position = 17
+		position = 18
 	)
 	default boolean resetSyncCache()
 	{

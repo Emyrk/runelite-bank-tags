@@ -158,6 +158,19 @@ Milestone 3b adds `BankTagSyncMetadata` and `BankTagSyncCoordinator`.
 - **Order** uploads are debounced; a `409` reconciles the local order with the server's manifest and retries exactly once. A successful order response is a full manifest and is processed like a poll result.
 - **Threading**: callbacks hop to the client thread through `ClientThread.invoke`; a generation counter makes replies from before `stop()` inert; nothing blocks.
 
+### Bundled Inventory Setups synchronization
+
+The bundled Inventory Setups sources remain owned by the pinned vendor submodule and are modified only at build time through `patches/inventory-setups/`. The synchronization patch adds persistent UUIDv4 IDs to setups and sections, starts and stops `InventorySetupSyncCoordinator` with the bundled plugin, and reports completed `InventorySetupsPersistentDataManager.updateConfig(...)` mutations to the coordinator.
+
+`com.emyrk.banktags.inventorysync` owns the integration boundary:
+
+- `InventorySetupRepository` converts the complete upstream v3 setup representation to shared documents and replaces the local Inventory Setups cache before one reload and UI redraw.
+- `InventorySetupSyncClient` implements the asynchronous setup, section, and global-order HTTP routes.
+- `InventorySetupSyncMetadata` stores remote revisions, base hashes, order state, documents, and conflicts in `emyrk-bank-tags-sync`.
+- `InventorySetupSyncCoordinator` polls manifests, debounces local writes, applies conflict and tombstone rules, suppresses feedback during remote application, and hops every plugin or `ConfigManager` operation to the client thread.
+
+Section membership is represented by ordered stable setup IDs and permits one setup in multiple sections. Section expansion state (`isMaximized`) never enters the wire document and is restored by section ID during remote application.
+
 ### Sync status, backoff, and recovery (Milestone 3c)
 
 `BankTagSyncStatus` holds the two observable enums. Menu text and chat messages read them, never exceptions or HTTP codes.
