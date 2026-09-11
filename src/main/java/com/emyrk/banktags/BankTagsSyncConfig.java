@@ -101,12 +101,27 @@ public interface BankTagsSyncConfig extends Config
 	 * A self-resetting action: the plugin clears the flag as soon as it sees {@code true}.
 	 */
 	@ConfigItem(
+		keyName = "forceResync",
+		name = "Force resync",
+		description = "Immediately checks the server for bank tag and Inventory Setup changes. Tick to run once.",
+		section = BankTagsConfig.SYNC_SECTION,
+		position = 18
+	)
+	default boolean forceResync()
+	{
+		return false;
+	}
+
+	/**
+	 * A self-resetting action: the plugin clears the flag as soon as it sees {@code true}.
+	 */
+	@ConfigItem(
 		keyName = "resetSyncCache",
 		name = "Reset synchronized cache",
 		description = "Deletes the local copy of synchronized tags and reloads them from the server. Your pre-sync local tags are not touched. Tick to run once.",
 		warning = "This deletes the local synchronized cache. Unsynced local changes to synchronized tags are lost.",
 		section = BankTagsConfig.SYNC_SECTION,
-		position = 18
+		position = 19
 	)
 	default boolean resetSyncCache()
 	{

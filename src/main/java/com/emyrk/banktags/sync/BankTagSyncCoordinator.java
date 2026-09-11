@@ -524,6 +524,25 @@ public class BankTagSyncCoordinator
 	// ---------------------------------------------------------------- polling
 
 	/**
+	 * Client thread. Cancels the next scheduled poll and checks the server immediately.
+	 * An already-running poll already satisfies the request and is left alone.
+	 */
+	public void forceResync()
+	{
+		if (!active)
+		{
+			return;
+		}
+		consecutiveFailures = 0;
+		cancel(pollFuture);
+		pollFuture = null;
+		if (!pollInFlight.get())
+		{
+			poll();
+		}
+	}
+
+	/**
 	 * Replaces the next probe with a poll {@code delaySeconds} from now.
 	 */
 	private void schedulePoll(long delaySeconds)

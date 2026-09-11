@@ -431,6 +431,17 @@ public class BankTagSyncCoordinatorTest
 	// ------------------------------------------------------------------ polling
 
 	@Test
+	public void forceResyncStartsManifestPollWithoutWaitingForScheduler() throws Exception
+	{
+		startSynced();
+
+		coordinator.forceResync();
+
+		await(() -> requests("GET", "/bank-tags").size() == 1 && !coordinator.isPollInFlight());
+		assertEquals("\"42\"", requests("GET", "/bank-tags").get(0).getHeader("If-None-Match"));
+	}
+
+	@Test
 	public void cleanRemoteUpdateAutoApplies() throws Exception
 	{
 		startSynced();

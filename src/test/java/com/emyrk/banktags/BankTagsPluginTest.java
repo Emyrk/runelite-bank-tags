@@ -39,6 +39,7 @@ import net.runelite.client.callback.ClientThread;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.game.ItemManager;
 import static com.emyrk.banktags.BankTagsPlugin.ITEM_KEY_PREFIX;
+import com.emyrk.banktags.inventorysync.InventorySetupSyncCoordinator;
 import com.emyrk.banktags.sync.BankTagSyncCoordinator;
 import com.emyrk.banktags.tabs.TabInterface;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -105,6 +106,10 @@ public class BankTagsPluginTest
 	@Mock
 	@Bind
 	private BankTagSyncCoordinator syncCoordinator;
+
+	@Mock
+	@Bind
+	private InventorySetupSyncCoordinator inventorySetupSyncCoordinator;
 
 	@Bind
 	@Named("developerMode")
@@ -251,6 +256,34 @@ public class BankTagsPluginTest
 
 		verifyNoInteractions(syncCoordinator);
 		verify(configManager, never()).unsetConfiguration(anyString(), anyString());
+	}
+
+	@Test
+	public void forceResyncTogglePullsBothSynchronizedResourcesImmediately()
+	{
+		ConfigChanged event = new ConfigChanged();
+		event.setGroup(BankTagsStorage.SYNC_SETTINGS_GROUP);
+		event.setKey("forceResync");
+		event.setNewValue("true");
+
+		bankTagsPlugin.onConfigChanged(event);
+
+		verify(configManager).setConfiguration(BankTagsStorage.SYNC_SETTINGS_GROUP, "forceResync", false);
+		verify(syncCoordinator).forceResync();
+		verify(inventorySetupSyncCoordinator).forceResync();
+	}
+
+	@Test
+	public void forceResyncWriteBackDoesNothing()
+	{
+		ConfigChanged event = new ConfigChanged();
+		event.setGroup(BankTagsStorage.SYNC_SETTINGS_GROUP);
+		event.setKey("forceResync");
+		event.setNewValue("false");
+
+		bankTagsPlugin.onConfigChanged(event);
+
+		verifyNoInteractions(syncCoordinator, inventorySetupSyncCoordinator);
 	}
 
 	@Test

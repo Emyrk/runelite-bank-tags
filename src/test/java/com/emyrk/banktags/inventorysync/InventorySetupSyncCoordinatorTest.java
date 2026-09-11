@@ -13,7 +13,9 @@ import java.util.concurrent.ScheduledExecutorService;
 import net.runelite.client.callback.ClientThread;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 public class InventorySetupSyncCoordinatorTest
@@ -30,6 +32,21 @@ public class InventorySetupSyncCoordinatorTest
 		set(coordinator, "applyingRemote", true);
 		coordinator.onLocalMutation(true, true);
 		verifyNoInteractions(executor);
+	}
+
+	@Test
+	public void forceResyncStartsManifestPollImmediately() throws Exception
+	{
+		InventorySetupSyncClient client = mock(InventorySetupSyncClient.class);
+		InventorySetupSyncMetadata metadata = mock(InventorySetupSyncMetadata.class);
+		InventorySetupSyncCoordinator coordinator = new InventorySetupSyncCoordinator(
+			client, mock(InventorySetupRepository.class), metadata, mock(BankTagsConfig.class),
+			mock(ScheduledExecutorService.class), mock(ClientThread.class));
+		set(coordinator, "active", true);
+
+		coordinator.forceResync();
+
+		verify(client).getManifest(any(), any());
 	}
 
 	@Test

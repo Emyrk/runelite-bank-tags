@@ -29,7 +29,7 @@ public class BankTagsConfigTest
 		assertTrue(visibleKeys.containsAll(Arrays.asList(
 			"useTabs", "rememberTab", "removeTabSeparators", "preventTagTabDrags",
 			"enabled", "groupName", "groupToken", "serverBaseUrl",
-			"pollIntervalSeconds", "uploadDebounceSeconds", "resetSyncCache")));
+			"pollIntervalSeconds", "uploadDebounceSeconds", "forceResync", "resetSyncCache")));
 
 		Method groupToken = Arrays.stream(BankTagsConfig.class.getMethods())
 			.filter(method -> method.getName().equals("groupToken"))

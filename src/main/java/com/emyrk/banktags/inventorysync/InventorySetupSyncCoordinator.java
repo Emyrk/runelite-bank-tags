@@ -193,6 +193,21 @@ public class InventorySetupSyncCoordinator
 		return true;
 	}
 
+	/** Cancels the next scheduled poll and checks the server immediately. */
+	public void forceResync()
+	{
+		if (!active)
+		{
+			return;
+		}
+		cancel(pollFuture);
+		pollFuture = null;
+		if (!pollInFlight.get())
+		{
+			poll();
+		}
+	}
+
 	private void poll()
 	{
 		if (!active || !pollInFlight.compareAndSet(false, true))

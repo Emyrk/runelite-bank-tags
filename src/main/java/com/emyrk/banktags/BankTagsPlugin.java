@@ -64,6 +64,7 @@ import net.runelite.client.game.chatbox.ChatboxPanelManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.bank.BankSearch;
+import com.emyrk.banktags.inventorysync.InventorySetupSyncCoordinator;
 import com.emyrk.banktags.sync.BankTagSyncCoordinator;
 import com.emyrk.banktags.tabs.Layout;
 import com.emyrk.banktags.tabs.LayoutManager;
@@ -95,6 +96,7 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 	public static final String TAG_LAYOUT_PREFIX = "layout_";
 	static final String ITEM_KEY_PREFIX = "item_";
 	static final String TAG_HIDDEN_PREFIX = "hidden_";
+	static final String FORCE_RESYNC_KEY = "forceResync";
 	static final String RESET_SYNC_CACHE_KEY = "resetSyncCache";
 
 	public static final String TAG_SEARCH = "tag:";
@@ -164,6 +166,9 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 
 	@Inject
 	private BankTagSyncCoordinator syncCoordinator;
+
+	@Inject
+	private InventorySetupSyncCoordinator inventorySetupSyncCoordinator;
 
 	@Inject
 	private BankTagsStorage storage;
@@ -568,6 +573,17 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 		if ("useTabs".equals(configChanged.getKey()))
 		{
 			clientThread.invokeLater(this::reinitBank);
+			return;
+		}
+		if (FORCE_RESYNC_KEY.equals(configChanged.getKey()))
+		{
+			// a self-resetting action; the write-back below fires this event again with "false"
+			if ("true".equals(configChanged.getNewValue()))
+			{
+				configManager.setConfiguration(BankTagsStorage.SYNC_SETTINGS_GROUP, FORCE_RESYNC_KEY, false);
+				syncCoordinator.forceResync();
+				inventorySetupSyncCoordinator.forceResync();
+			}
 			return;
 		}
 		if (RESET_SYNC_CACHE_KEY.equals(configChanged.getKey()))
