@@ -12,13 +12,20 @@ if pgrep -f -- "${destination_jar}" >/dev/null 2>&1; then
 fi
 
 cd -- "${repo_root}"
+git submodule update --init --recursive
 
+build_args=(clean test shadowJar --no-daemon)
 if command -v javac >/dev/null 2>&1 && command -v java >/dev/null 2>&1; then
-	./gradlew clean shadowJar
-elif command -v nix >/dev/null 2>&1; then
-	nix shell nixpkgs#jdk21_headless --command ./gradlew clean shadowJar
+	./gradlew "${build_args[@]}"
+elif command -v nix-shell >/dev/null 2>&1; then
+	nix-shell -E 'with import <nixpkgs> {}; mkShell {
+		packages = [ jdk11 ];
+		LD_LIBRARY_PATH = lib.makeLibraryPath [
+			xorg.libXrender xorg.libXtst xorg.libXi xorg.libXext xorg.libX11
+		];
+	}' --run './gradlew clean test shadowJar --no-daemon'
 else
-	echo "A JDK or Nix is required to build the development JAR." >&2
+	echo "A JDK or nix-shell is required to build the development JAR." >&2
 	exit 1
 fi
 
@@ -28,9 +35,35 @@ if [[ ${#built_jars[@]} -ne 1 ]]; then
 	exit 1
 fi
 
+validate_jar()
+{
+	local jar=$1
+	local entries
+	entries=$(unzip -Z1 "${jar}")
+	for required in \
+		com/emyrk/banktags/BankTagsPlugin.class \
+		inventorysetups/InventorySetupsPlugin.class \
+		runelite-plugin.properties \
+		invsetups_version.txt \
+		META-INF/licenses/inventory-setups-BSD-2-Clause.txt
+	do
+		if ! grep -Fqx -- "${required}" <<<"${entries}"; then
+			echo "Combined JAR is missing ${required}." >&2
+			exit 1
+		fi
+	done
+}
+
+validate_jar "${built_jars[0]}"
 mkdir -p -- "${destination_dir}"
-install -m 0644 -- "${built_jars[0]}" "${destination_jar}"
+temporary_jar=$(mktemp "${destination_dir}/.bank-tags-extended-dev.XXXXXX.jar")
+trap 'rm -f -- "${temporary_jar}"' EXIT
+install -m 0644 -- "${built_jars[0]}" "${temporary_jar}"
+validate_jar "${temporary_jar}"
+mv -f -- "${temporary_jar}" "${destination_jar}"
+trap - EXIT
 
 echo "Updated Bolt development plugin:"
 echo "  ${destination_jar}"
-echo "Restart RuneLite through Bolt to load the new build."
+echo "The JAR contains Bank Tags Extended and its bundled Inventory Setups companion."
+echo "Fully restart RuneLite through Bolt to load the new build."

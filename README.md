@@ -8,6 +8,14 @@ The initial implementation tracks RuneLite's built-in Bank Tags plugin and uses 
 
 **Disable RuneLite's built-in Bank Tags plugin before enabling Bank Tags Extended.** Running both plugins together is unsupported because both plugins modify the same bank interface. The fork uses its own configuration after the one-time import.
 
+## Bundled Inventory Setups
+
+The release JAR also contains a pinned, compatibility-patched build of the upstream Inventory Setups plugin. It uses Bank Tags Extended instead of enabling RuneLite's built-in Bank Tags plugin. Inventory Setups keeps its existing `inventorysetups` configuration group, so existing setups remain available.
+
+Only the Bank Tags Extended JAR is installed. RuneLite still shows the normal **Inventory Setups** entry and sidebar so its settings remain accessible, but that plugin class comes from the same combined JAR and is enabled by default. Remove or disable any separately installed Inventory Setups copy and disable RuneLite's built-in Bank Tags plugin.
+
+The original source is pinned as the `vendor/inventory-setups` git submodule. `scripts/prepare-inventory-setups.sh` copies it into `build/generated`, applies the patches under `patches/inventory-setups`, and leaves the submodule untouched. Its BSD 2-Clause license is included under `LICENSES/` and in release JARs.
+
 ## Development
 
 This project requires Java 11 or newer to run Gradle. The build pins a Java 11 toolchain, so compiling, testing, and `./gradlew run` always use JDK 11; Gradle downloads one automatically if none is installed.

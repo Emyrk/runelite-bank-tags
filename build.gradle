@@ -16,6 +16,23 @@ repositories {
 def runeLiteVersion = 'latest.release'
 def pluginMainClass = 'com.emyrk.banktags.BankTagsPluginLauncher'
 
+def generatedInventorySetupsDir = layout.buildDirectory.dir('generated/inventory-setups')
+
+tasks.register('prepareInventorySetups', Exec) {
+	inputs.file('scripts/prepare-inventory-setups.sh')
+	inputs.dir('patches/inventory-setups')
+	inputs.dir('vendor/inventory-setups/src/main')
+	outputs.dir(generatedInventorySetupsDir)
+	commandLine 'bash', 'scripts/prepare-inventory-setups.sh', generatedInventorySetupsDir.get().asFile.absolutePath
+}
+
+sourceSets {
+	main {
+		java.srcDir(generatedInventorySetupsDir.map { it.dir('java') })
+		resources.srcDir(generatedInventorySetupsDir.map { it.dir('resources') })
+	}
+}
+
 dependencies {
 	compileOnly group: 'net.runelite', name:'client', version: runeLiteVersion
 
@@ -41,6 +58,14 @@ java {
 	}
 }
 
+tasks.named('compileJava') {
+	dependsOn tasks.named('prepareInventorySetups')
+}
+
+tasks.named('processResources') {
+	dependsOn tasks.named('prepareInventorySetups')
+}
+
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
 }
@@ -48,6 +73,9 @@ tasks.withType(JavaCompile).configureEach {
 processResources {
 	// runelite-plugin.properties lives at the repo root (Plugin Hub
 	// convention); bake the build version into the copy shipped in the jar.
+	from('LICENSES/inventory-setups-BSD-2-Clause.txt') {
+		into 'META-INF/licenses'
+	}
 	from('runelite-plugin.properties')
 	inputs.property('version', project.version)
 	filesMatching('runelite-plugin.properties') {

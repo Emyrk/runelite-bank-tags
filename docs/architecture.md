@@ -6,6 +6,12 @@ Bank Tags Extended is a standalone external RuneLite plugin based on RuneLite's 
 
 The plugin optionally synchronizes tag data through the groupiron.men API. Local tag data, synchronized cache data, connection settings, and sync metadata remain durable through RuneLite's `ConfigManager`.
 
+## Bundled Inventory Setups companion
+
+The single release JAR contains both `BankTagsPlugin` and a pinned build of `inventorysetups.InventorySetupsPlugin`. Inventory Setups remains a separate internal RuneLite plugin class so its upstream lifecycle, visible settings entry, panel, and persistence remain intact, and it is enabled by default. Its dependency and Bank Tags imports are patched to use Bank Tags Extended. The existing `inventorysetups` configuration group and plugin toggle key are unchanged.
+
+`vendor/inventory-setups` is a read-only git submodule pinned to a reviewed upstream commit. `prepareInventorySetups` copies its production sources and resources to `build/generated/inventory-setups`, applies the deterministic patch series in `patches/inventory-setups`, and generates `invsetups_version.txt`. Neither local nor CI builds modify the vendor checkout. `runelite-plugin.properties` advertises both plugin classes, and the development launcher loads both.
+
 ## Lifecycle
 
 `BankTagsPlugin` is the plugin entry point.

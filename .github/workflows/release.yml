@@ -69,6 +69,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       # build.gradle pins a Java 11 toolchain, so this only pre-installs the
       # JDK the toolchain resolver would otherwise download.
@@ -112,6 +114,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: true
+          submodules: recursive
 
       - name: Determine and create release tag
         id: tag

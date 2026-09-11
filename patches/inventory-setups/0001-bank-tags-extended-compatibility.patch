@@ -1,0 +1,83 @@
+diff --git a/inventorysetups/InventorySetupLayoutUtilities.java b/inventorysetups/InventorySetupLayoutUtilities.java
+index 4d0fc18..19623ae 100644
+--- a/inventorysetups/InventorySetupLayoutUtilities.java
++++ b/inventorysetups/InventorySetupLayoutUtilities.java
+@@ -8,9 +8,9 @@ import net.runelite.api.ItemComposition;
+ import net.runelite.api.ItemContainer;
+ import net.runelite.api.gameval.ItemID;
+ import net.runelite.client.game.ItemManager;
+-import net.runelite.client.plugins.banktags.TagManager;
+-import net.runelite.client.plugins.banktags.tabs.Layout;
+-import net.runelite.client.plugins.banktags.tabs.LayoutManager;
++import com.emyrk.banktags.TagManager;
++import com.emyrk.banktags.tabs.Layout;
++import com.emyrk.banktags.tabs.LayoutManager;
+ import net.runelite.client.util.Text;
+ 
+ import javax.swing.JOptionPane;
+diff --git a/inventorysetups/InventorySetupsPersistentDataManager.java b/inventorysetups/InventorySetupsPersistentDataManager.java
+index f075ae1..2e4af1b 100644
+--- a/inventorysetups/InventorySetupsPersistentDataManager.java
++++ b/inventorysetups/InventorySetupsPersistentDataManager.java
+@@ -26,8 +26,8 @@ import java.util.stream.Collectors;
+ import static inventorysetups.InventorySetupsPlugin.CONFIG_GROUP;
+ import static inventorysetups.InventorySetupsPlugin.CONFIG_GROUP_HUB_BTL;
+ import static inventorysetups.InventorySetupsPlugin.LAYOUT_PREFIX_MARKER;
+-import net.runelite.client.plugins.banktags.BankTagsPlugin;
+-import net.runelite.client.plugins.banktags.tabs.Layout;
++import com.emyrk.banktags.BankTagsPlugin;
++import com.emyrk.banktags.tabs.Layout;
+ 
+ @Slf4j
+ public class InventorySetupsPersistentDataManager
+diff --git a/inventorysetups/InventorySetupsPlugin.java b/inventorysetups/InventorySetupsPlugin.java
+index b253927..6e60877 100644
+--- a/inventorysetups/InventorySetupsPlugin.java
++++ b/inventorysetups/InventorySetupsPlugin.java
+@@ -104,8 +104,8 @@ import net.runelite.client.plugins.PluginDependency;
+ import net.runelite.client.plugins.PluginDescriptor;
+ import net.runelite.client.plugins.PluginManager;
+ import net.runelite.client.plugins.bank.BankSearch;
+-import net.runelite.client.plugins.banktags.TagManager;
+-import net.runelite.client.plugins.banktags.tabs.LayoutManager;
++import com.emyrk.banktags.TagManager;
++import com.emyrk.banktags.tabs.LayoutManager;
+ import net.runelite.client.ui.ClientToolbar;
+ import net.runelite.client.ui.JagexColors;
+ import net.runelite.client.ui.NavigationButton;
+@@ -114,9 +114,9 @@ import net.runelite.client.ui.components.colorpicker.RuneliteColorPicker;
+ import net.runelite.client.util.ColorUtil;
+ import net.runelite.client.util.HotkeyListener;
+ import net.runelite.client.util.ImageUtil;
+-import net.runelite.client.plugins.banktags.BankTagsPlugin;
+-import net.runelite.client.plugins.banktags.BankTagsService;
+-import net.runelite.client.plugins.banktags.tabs.Layout;
++import com.emyrk.banktags.BankTagsPlugin;
++import com.emyrk.banktags.BankTagsService;
++import com.emyrk.banktags.tabs.Layout;
+ 
+ import javax.swing.JFileChooser;
+ import javax.swing.JLabel;
+@@ -133,7 +133,8 @@ import static inventorysetups.ui.InventorySetupsRunePouchPanel.RUNE_POUCH_RUNE_V
+ 
+ @PluginDescriptor(
+ 	name = "Inventory Setups",
+-	description = "Save gear setups for specific activities"
++	description = "Save gear setups for specific activities",
++	enabledByDefault = true
+ )
+ 
+ @PluginDependency(BankTagsPlugin.class)
+diff --git a/inventorysetups/serialization/InventorySetupPortable.java b/inventorysetups/serialization/InventorySetupPortable.java
+index d00cd30..4f86d23 100644
+--- a/inventorysetups/serialization/InventorySetupPortable.java
++++ b/inventorysetups/serialization/InventorySetupPortable.java
+@@ -3,7 +3,7 @@ package inventorysetups.serialization;
+ import inventorysetups.InventorySetup;
+ import inventorysetups.InventorySetupLayoutUtilities;
+ import lombok.Value;
+-import net.runelite.client.plugins.banktags.tabs.Layout;
++import com.emyrk.banktags.tabs.Layout;
+ 
+ import java.util.ArrayList;
+ import java.util.List;

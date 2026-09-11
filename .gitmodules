@@ -1,0 +1,3 @@
+[submodule "vendor/inventory-setups"]
+	path = vendor/inventory-setups
+	url = https://github.com/dillydill123/inventory-setups.git

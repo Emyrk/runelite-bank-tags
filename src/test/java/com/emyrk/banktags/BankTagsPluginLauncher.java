@@ -15,7 +15,7 @@ public class BankTagsPluginLauncher
 		classLoader.setDefaultAssertionStatus(true);
 		classLoader.setPackageAssertionStatus("net.runelite", true);
 		classLoader.setClassAssertionStatus(ExternalPluginManager.class.getName(), true);
-		ExternalPluginManager.loadBuiltin(BankTagsPlugin.class);
+		ExternalPluginManager.loadBuiltin(BankTagsPlugin.class, inventorysetups.InventorySetupsPlugin.class);
 
 		// Bolt's RuneLite launcher passes launcher-specific JVM arguments through to
 		// the JAR. This development launcher invokes RuneLite directly, so remove
