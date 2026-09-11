@@ -1,13 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage()
+{
+	echo "Usage: $0 [-f]" >&2
+	echo "  -f  Replace the development JAR even when RuneLite is using the current one." >&2
+}
+
+force=false
+while getopts ":fh" option; do
+	case "${option}" in
+		f) force=true ;;
+		h) usage; exit 0 ;;
+		?) usage; exit 2 ;;
+	esac
+done
+shift $((OPTIND - 1))
+if [[ $# -ne 0 ]]; then
+	usage
+	exit 2
+fi
+
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 bolt_data_dir=${BOLT_DATA_DIR:-"${HOME}/.var/app/com.adamcake.Bolt/data/bolt-launcher"}
 destination_dir="${bolt_data_dir}/dev-jars"
 destination_jar="${destination_dir}/bank-tags-extended-dev.jar"
 
-if pgrep -f -- "${destination_jar}" >/dev/null 2>&1; then
-	echo "Close the Bank Tags Extended development RuneLite client before updating." >&2
+if [[ ${force} != true ]] && pgrep -f -- "${destination_jar}" >/dev/null 2>&1; then
+	echo "Close the Bank Tags Extended development RuneLite client before updating, or use -f to replace the JAR anyway." >&2
 	exit 1
 fi
 

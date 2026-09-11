@@ -126,6 +126,14 @@ After changing the plugin, close its RuneLite window and run:
 ./scripts/update-bolt-dev.sh
 ```
 
+To replace the JAR while its RuneLite client is still running, use `-f`:
+
+```sh
+./scripts/update-bolt-dev.sh -f
+```
+
+The running client continues using its already-loaded classes, so fully restart it before testing the new JAR.
+
 The script builds the executable development JAR, using a temporary Nix JDK when no host JDK is available, and installs it at:
 
 ```text
