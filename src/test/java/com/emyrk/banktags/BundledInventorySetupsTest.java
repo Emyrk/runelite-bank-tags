@@ -17,8 +17,10 @@ public class BundledInventorySetupsTest
 		assertEquals(BankTagsPlugin.class, dependency.value());
 
 		PluginDescriptor descriptor = InventorySetupsPlugin.class.getAnnotation(PluginDescriptor.class);
-		assertEquals("Inventory Setups", descriptor.name());
-		assertEquals("", descriptor.configName());
+		assertEquals("Inventory Setups Extended", descriptor.name());
+		assertEquals("inventorySetupsExtended", descriptor.configName());
+		assertEquals(1, descriptor.conflicts().length);
+		assertEquals("Inventory Setups", descriptor.conflicts()[0]);
 		assertTrue(descriptor.enabledByDefault());
 	}
 

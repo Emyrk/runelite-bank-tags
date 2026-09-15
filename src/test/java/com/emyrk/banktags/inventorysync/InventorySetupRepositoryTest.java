@@ -56,6 +56,18 @@ public class InventorySetupRepositoryTest
 	}
 
 	@Test
+	public void newlyCreatedSectionReceivesStableIdBeforePersistence()
+	{
+		InventorySetupsSection section = new InventorySetupsSection("Minigames");
+
+		String id = InventorySetupIds.requireStableId(section);
+
+		assertEquals(id, section.getSyncId());
+		assertEquals(4, java.util.UUID.fromString(id).version());
+		assertEquals(id, InventorySetupIds.requireStableId(section));
+	}
+
+	@Test
 	public void duplicateOrInvalidIdsAreReplacedWithUniqueUuidV4()
 	{
 		InventorySetup first = setup("one", "", SETUP_ID);

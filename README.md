@@ -12,7 +12,7 @@ The initial implementation tracks RuneLite's built-in Bank Tags plugin and uses 
 
 The release JAR also contains a pinned, compatibility-patched build of the upstream Inventory Setups plugin. It uses Bank Tags Extended instead of enabling RuneLite's built-in Bank Tags plugin. Inventory Setups keeps its existing `inventorysetups` configuration group, so existing setups remain available.
 
-Only the Bank Tags Extended JAR is installed. RuneLite still shows the normal **Inventory Setups** entry and sidebar so its settings remain accessible, but that plugin class comes from the same combined JAR and is enabled by default. Remove or disable any separately installed Inventory Setups copy and disable RuneLite's built-in Bank Tags plugin.
+Only the Bank Tags Extended JAR is installed. RuneLite shows the bundled companion as **Inventory Setups Extended** so it is distinguishable from the standalone Plugin Hub copy. It remains enabled by default, retains the existing `inventorysetups` data, and conflicts with the standalone **Inventory Setups** plugin. Remove or disable any separately installed Inventory Setups copy and disable RuneLite's built-in Bank Tags plugin.
 
 The original source is pinned as the `vendor/inventory-setups` git submodule. `scripts/prepare-inventory-setups.sh` copies it into `build/generated`, applies the patches under `patches/inventory-setups`, and leaves the submodule untouched. Its BSD 2-Clause license is included under `LICENSES/` and in release JARs.
 

@@ -58,16 +58,28 @@ index b253927..6e60877 100644
  
  import javax.swing.JFileChooser;
  import javax.swing.JLabel;
-@@ -133,7 +133,8 @@ import static inventorysetups.ui.InventorySetupsRunePouchPanel.RUNE_POUCH_RUNE_V
+@@ -133,7 +133,10 @@ import static inventorysetups.ui.InventorySetupsRunePouchPanel.RUNE_POUCH_RUNE_V
  
  @PluginDescriptor(
- 	name = "Inventory Setups",
+-	name = "Inventory Setups",
 -	description = "Save gear setups for specific activities"
-+	description = "Save gear setups for specific activities",
++	name = "Inventory Setups Extended",
++	configName = "inventorySetupsExtended",
++	description = "Save gear setups for specific activities with Bank Tags Extended integration",
++	conflicts = {"Inventory Setups"},
 +	enabledByDefault = true
  )
  
  @PluginDependency(BankTagsPlugin.class)
+@@ -349,7 +352,7 @@ public class InventorySetupsPlugin extends Plugin
+ 
+ 		this.navButtonIsSelected = false;
+ 		navButton = NavigationButton.builder()
+-				.tooltip("Inventory Setups")
++				.tooltip("Inventory Setups Extended")
+ 				.icon(icon)
+ 				.priority(6)
+ 				.panel(panel)
 diff --git a/inventorysetups/serialization/InventorySetupPortable.java b/inventorysetups/serialization/InventorySetupPortable.java
 index d00cd30..4f86d23 100644
 --- a/inventorysetups/serialization/InventorySetupPortable.java

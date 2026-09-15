@@ -50,6 +50,17 @@ public final class InventorySetupIds
 		return id;
 	}
 
+	public static String requireStableId(InventorySetupsSection section)
+	{
+		String id = normalize(section.getSyncId());
+		if (id == null)
+		{
+			id = UUID.randomUUID().toString();
+			section.setSyncId(id);
+		}
+		return id;
+	}
+
 	public static String normalize(String id)
 	{
 		if (id == null || !id.equals(id.toLowerCase(Locale.ROOT))) return null;

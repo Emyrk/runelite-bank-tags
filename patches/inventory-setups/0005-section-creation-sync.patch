@@ -1,0 +1,24 @@
+--- a/inventorysetups/InventorySetupsPlugin.java
++++ b/inventorysetups/InventorySetupsPlugin.java
+@@ -24,5 +24,6 @@
+ package inventorysetups;
+ 
++import com.emyrk.banktags.inventorysync.InventorySetupIds;
+ import com.emyrk.banktags.inventorysync.InventorySetupSyncCoordinator;
+ 
+ import com.google.gson.Gson;
+@@ -1124,9 +1125,14 @@ public class InventorySetupsPlugin extends Plugin
+ 		final String newName = name;
+ 		InventorySetupsSection newSection = new InventorySetupsSection(newName);
++		InventorySetupIds.requireStableId(newSection);
+ 		cache.addSection(newSection);
+ 		sections.add(newSection);
+ 
+ 		dataManager.updateConfig(false, true);
++		if (!config.sectionMode())
++		{
++			setConfigValue(CONFIG_KEY_SECTION_MODE, true);
++		}
+ 		SwingUtilities.invokeLater(() -> panel.redrawOverviewPanel(false));
+ 
+ 	}
