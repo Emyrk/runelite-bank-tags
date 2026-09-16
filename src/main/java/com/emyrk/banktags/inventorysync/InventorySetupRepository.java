@@ -3,6 +3,7 @@ package com.emyrk.banktags.inventorysync;
 import com.emyrk.banktags.inventorysync.model.SharedInventorySetup;
 import com.emyrk.banktags.inventorysync.model.SharedInventorySetupSection;
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import inventorysetups.InventorySetup;
 import inventorysetups.InventorySetupsPersistentDataManager;
@@ -14,6 +15,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -99,7 +101,7 @@ public class InventorySetupRepository
 			}
 			setupOrder.add(setup.getSetupId());
 			nameById.put(setup.getSetupId(), setup.getName());
-			JsonObject value = setup.getPayload();
+			JsonObject value = localPayload(setup.getPayload());
 			value.addProperty("name", setup.getName());
 			value.addProperty("notes", setup.getNotes());
 			value.addProperty("sid", setup.getSetupId());
@@ -139,6 +141,47 @@ public class InventorySetupRepository
 		configManager.setConfiguration(InventorySetupsPlugin.CONFIG_GROUP,
 			InventorySetupsPersistentDataManager.CONFIG_KEY_SECTIONS, gson.toJson(localSections));
 		plugin.reloadInventorySetupSyncState();
+	}
+
+	/**
+	 * RuneLite persists {@link Color} values as {@code #AARRGGBB}. Early website-created setup
+	 * documents used either an ARGB integer or Gson's reflective {@code {value, falpha}} shape.
+	 * Normalize both legacy wire forms before handing the document back to Inventory Setups.
+	 */
+	private static JsonObject localPayload(JsonObject payload)
+	{
+		JsonObject normalized = payload.deepCopy();
+		normalizeColor(normalized, "hc");
+		normalizeColor(normalized, "dc");
+		return normalized;
+	}
+
+	private static void normalizeColor(JsonObject payload, String property)
+	{
+		JsonElement color = payload.get(property);
+		if (color == null || color.isJsonNull() || color.isJsonPrimitive() && color.getAsJsonPrimitive().isString())
+		{
+			return;
+		}
+
+		Integer argb = null;
+		if (color.isJsonPrimitive() && color.getAsJsonPrimitive().isNumber())
+		{
+			argb = color.getAsInt();
+		}
+		else if (color.isJsonObject())
+		{
+			JsonElement value = color.getAsJsonObject().get("value");
+			if (value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber())
+			{
+				argb = value.getAsInt();
+			}
+		}
+
+		if (argb != null)
+		{
+			payload.addProperty(property, String.format(Locale.ROOT, "#%08X", argb));
+		}
 	}
 
 	public static final class Snapshot

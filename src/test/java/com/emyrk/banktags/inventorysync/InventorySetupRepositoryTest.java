@@ -111,12 +111,22 @@ public class InventorySetupRepositoryTest
 		JsonObject payload = gson.toJsonTree(InventorySetupSerializable.convertFromInventorySetup(
 			setup("Zulrah", "remote", SETUP_ID))).getAsJsonObject();
 		payload.remove("name"); payload.remove("notes"); payload.remove("sid");
+		payload.addProperty("hc", -65536);
+		JsonObject reflectiveColor = new JsonObject();
+		reflectiveColor.addProperty("value", -16711936);
+		reflectiveColor.addProperty("falpha", 0.0);
+		payload.add("dc", reflectiveColor);
 		SharedInventorySetup remote = new SharedInventorySetup(SETUP_ID, "Zulrah", "remote", payload, 2, false);
 		SharedInventorySetupSection section = new SharedInventorySetupSection(SECTION_ID, "Bossing", null,
 			Arrays.asList(SETUP_ID, OTHER_ID), 3, false);
 
 		repository.apply(plugin, Collections.singletonList(remote), Collections.singletonList(section));
 		verify(plugin).reloadInventorySetupSyncState();
+		String setupJson = values.get(FakeConfigManager.key(InventorySetupsPlugin.CONFIG_GROUP,
+			InventorySetupsPersistentDataManager.CONFIG_KEY_SETUPS_V3_PREFIX + SETUP_ID));
+		JsonObject storedSetup = gson.fromJson(setupJson, JsonObject.class);
+		assertEquals("#FFFF0000", storedSetup.get("hc").getAsString());
+		assertEquals("#FF00FF00", storedSetup.get("dc").getAsString());
 		String sectionsJson = values.get(FakeConfigManager.key(InventorySetupsPlugin.CONFIG_GROUP,
 			InventorySetupsPersistentDataManager.CONFIG_KEY_SECTIONS));
 		JsonObject storedSection = gson.fromJson(sectionsJson, JsonArray.class).get(0).getAsJsonObject();
