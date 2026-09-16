@@ -27,7 +27,10 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -96,6 +99,10 @@ public class InventorySetupRepositoryTest
 		assertFalse(snapshot.getSetups().get(0).getPayload().has("name"));
 		assertFalse(snapshot.getSetups().get(0).getPayload().has("notes"));
 		assertFalse(snapshot.getSetups().get(0).getPayload().has("sid"));
+		JsonObject item = snapshot.getSetups().get(0).getPayload().getAsJsonArray("inv").get(0).getAsJsonObject();
+		assertFalse(item.has("q"));
+		assertFalse(item.has("f"));
+		assertFalse(item.has("sc"));
 		assertEquals(Arrays.asList(OTHER_ID, SETUP_ID), snapshot.getSections().get(0).getOrderedSetupIds());
 		assertEquals(Collections.singletonList(SETUP_ID), snapshot.getSections().get(1).getOrderedSetupIds());
 	}
@@ -116,6 +123,10 @@ public class InventorySetupRepositoryTest
 		reflectiveColor.addProperty("value", -16711936);
 		reflectiveColor.addProperty("falpha", 0.0);
 		payload.add("dc", reflectiveColor);
+		JsonObject item = payload.getAsJsonArray("inv").get(0).getAsJsonObject();
+		item.add("q", com.google.gson.JsonNull.INSTANCE);
+		item.add("f", com.google.gson.JsonNull.INSTANCE);
+		item.add("sc", com.google.gson.JsonNull.INSTANCE);
 		SharedInventorySetup remote = new SharedInventorySetup(SETUP_ID, "Zulrah", "remote", payload, 2, false);
 		SharedInventorySetupSection section = new SharedInventorySetupSection(SECTION_ID, "Bossing", null,
 			Arrays.asList(SETUP_ID, OTHER_ID), 3, false);
@@ -127,11 +138,53 @@ public class InventorySetupRepositoryTest
 		JsonObject storedSetup = gson.fromJson(setupJson, JsonObject.class);
 		assertEquals("#FFFF0000", storedSetup.get("hc").getAsString());
 		assertEquals("#FF00FF00", storedSetup.get("dc").getAsString());
+		JsonObject storedItem = storedSetup.getAsJsonArray("inv").get(0).getAsJsonObject();
+		assertFalse(storedItem.has("q"));
+		assertFalse(storedItem.has("f"));
+		assertFalse(storedItem.has("sc"));
 		String sectionsJson = values.get(FakeConfigManager.key(InventorySetupsPlugin.CONFIG_GROUP,
 			InventorySetupsPersistentDataManager.CONFIG_KEY_SECTIONS));
 		JsonObject storedSection = gson.fromJson(sectionsJson, JsonArray.class).get(0).getAsJsonObject();
 		assertTrue(storedSection.get("isMaximized").getAsBoolean());
 		assertEquals(Collections.singletonList("Zulrah"), gson.fromJson(storedSection.get("setups"), List.class));
+	}
+
+	@Test
+	public void failedReloadRestoresPreviousLocalConfiguration()
+	{
+		Map<String, String> values = FakeConfigManager.newValues();
+		String setupKey = FakeConfigManager.key(InventorySetupsPlugin.CONFIG_GROUP,
+			InventorySetupsPersistentDataManager.CONFIG_KEY_SETUPS_V3_PREFIX + OTHER_ID);
+		String orderKey = FakeConfigManager.key(InventorySetupsPlugin.CONFIG_GROUP,
+			InventorySetupsPersistentDataManager.CONFIG_KEY_SETUPS_ORDER_V3);
+		String sectionsKey = FakeConfigManager.key(InventorySetupsPlugin.CONFIG_GROUP,
+			InventorySetupsPersistentDataManager.CONFIG_KEY_SECTIONS);
+		values.put(setupKey, "{\"name\":\"Local setup\"}");
+		values.put(orderKey, "[\"" + OTHER_ID + "\"]");
+		values.put(sectionsKey, "[]");
+		Map<String, String> before = new HashMap<>(values);
+		ConfigManager config = FakeConfigManager.create(values);
+		InventorySetupsPlugin plugin = plugin(new ArrayList<>(), Collections.emptyList());
+		doThrow(new IllegalStateException("remote document cannot load"))
+			.doNothing().when(plugin).reloadInventorySetupSyncState();
+		InventorySetupRepository repository = new InventorySetupRepository(config, gson);
+		JsonObject payload = gson.toJsonTree(InventorySetupSerializable.convertFromInventorySetup(
+			setup("Remote setup", "", SETUP_ID))).getAsJsonObject();
+		payload.remove("name"); payload.remove("notes"); payload.remove("sid");
+		SharedInventorySetup remote = new SharedInventorySetup(SETUP_ID, "Remote setup", "", payload, 1, false);
+
+		try
+		{
+			repository.apply(plugin, Collections.singletonList(remote), Collections.emptyList());
+			throw new AssertionError("Expected apply to fail");
+		}
+		catch (IllegalStateException expected)
+		{
+			assertEquals("remote document cannot load", expected.getMessage());
+		}
+
+		assertEquals(before, values);
+		verify(plugin, times(2)).reloadInventorySetupSyncState();
 	}
 
 	private static InventorySetup setup(String name, String notes, String id)

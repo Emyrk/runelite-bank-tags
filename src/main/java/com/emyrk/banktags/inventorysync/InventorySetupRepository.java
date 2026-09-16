@@ -32,7 +32,7 @@ public class InventorySetupRepository
 	public InventorySetupRepository(ConfigManager configManager, Gson gson)
 	{
 		this.configManager = configManager;
-		this.gson = gson.newBuilder().serializeNulls().create();
+		this.gson = gson.newBuilder().create();
 	}
 
 	public Snapshot snapshot(InventorySetupsPlugin plugin)
@@ -82,14 +82,50 @@ public class InventorySetupRepository
 
 		String wholePrefix = ConfigManager.getWholeKey(InventorySetupsPlugin.CONFIG_GROUP, null,
 			InventorySetupsPersistentDataManager.CONFIG_KEY_SETUPS_V3_PREFIX);
+		Map<String, String> previousSetups = setupConfigurations(wholePrefix);
+		String previousOrder = configManager.getConfiguration(InventorySetupsPlugin.CONFIG_GROUP,
+			InventorySetupsPersistentDataManager.CONFIG_KEY_SETUPS_ORDER_V3);
+		String previousSections = configManager.getConfiguration(InventorySetupsPlugin.CONFIG_GROUP,
+			InventorySetupsPersistentDataManager.CONFIG_KEY_SECTIONS);
+
+		try
+		{
+			writeLocal(setups, sections, maximized, wholePrefix);
+			plugin.reloadInventorySetupSyncState();
+		}
+		catch (RuntimeException ex)
+		{
+			restoreLocal(previousSetups, previousOrder, previousSections, wholePrefix);
+			try
+			{
+				plugin.reloadInventorySetupSyncState();
+			}
+			catch (RuntimeException restoreFailure)
+			{
+				ex.addSuppressed(restoreFailure);
+			}
+			throw ex;
+		}
+	}
+
+	private Map<String, String> setupConfigurations(String wholePrefix)
+	{
+		Map<String, String> values = new LinkedHashMap<>();
 		for (String key : configManager.getConfigurationKeys(wholePrefix))
 		{
 			String[] parts = key.split("\\.", 2);
 			if (parts.length == 2)
 			{
-				configManager.unsetConfiguration(parts[0], parts[1]);
+				values.put(key, configManager.getConfiguration(parts[0], parts[1]));
 			}
 		}
+		return values;
+	}
+
+	private void writeLocal(List<SharedInventorySetup> setups, List<SharedInventorySetupSection> sections,
+		Map<String, Boolean> maximized, String wholePrefix)
+	{
+		unsetSetupConfigurations(wholePrefix);
 
 		List<String> setupOrder = new ArrayList<>();
 		Map<String, String> nameById = new LinkedHashMap<>();
@@ -140,7 +176,45 @@ public class InventorySetupRepository
 		}
 		configManager.setConfiguration(InventorySetupsPlugin.CONFIG_GROUP,
 			InventorySetupsPersistentDataManager.CONFIG_KEY_SECTIONS, gson.toJson(localSections));
-		plugin.reloadInventorySetupSyncState();
+	}
+
+	private void restoreLocal(Map<String, String> setups, String order, String sections, String wholePrefix)
+	{
+		unsetSetupConfigurations(wholePrefix);
+		for (Map.Entry<String, String> entry : setups.entrySet())
+		{
+			String[] parts = entry.getKey().split("\\.", 2);
+			if (parts.length == 2 && entry.getValue() != null)
+			{
+				configManager.setConfiguration(parts[0], parts[1], entry.getValue());
+			}
+		}
+		restoreConfiguration(InventorySetupsPersistentDataManager.CONFIG_KEY_SETUPS_ORDER_V3, order);
+		restoreConfiguration(InventorySetupsPersistentDataManager.CONFIG_KEY_SECTIONS, sections);
+	}
+
+	private void unsetSetupConfigurations(String wholePrefix)
+	{
+		for (String key : configManager.getConfigurationKeys(wholePrefix))
+		{
+			String[] parts = key.split("\\.", 2);
+			if (parts.length == 2)
+			{
+				configManager.unsetConfiguration(parts[0], parts[1]);
+			}
+		}
+	}
+
+	private void restoreConfiguration(String key, String value)
+	{
+		if (value == null)
+		{
+			configManager.unsetConfiguration(InventorySetupsPlugin.CONFIG_GROUP, key);
+		}
+		else
+		{
+			configManager.setConfiguration(InventorySetupsPlugin.CONFIG_GROUP, key, value);
+		}
 	}
 
 	/**
@@ -153,7 +227,48 @@ public class InventorySetupRepository
 		JsonObject normalized = payload.deepCopy();
 		normalizeColor(normalized, "hc");
 		normalizeColor(normalized, "dc");
+		normalizeItems(normalized);
 		return normalized;
+	}
+
+	private static void normalizeItems(JsonObject payload)
+	{
+		for (String property : new String[]{"inv", "eq", "rp", "bp", "qv"})
+		{
+			JsonElement items = payload.get(property);
+			if (items != null && items.isJsonArray())
+			{
+				for (JsonElement item : items.getAsJsonArray())
+				{
+					normalizeItem(item);
+				}
+			}
+		}
+
+		JsonElement additionalItems = payload.get("afi");
+		if (additionalItems != null && additionalItems.isJsonObject())
+		{
+			for (Map.Entry<String, JsonElement> entry : additionalItems.getAsJsonObject().entrySet())
+			{
+				normalizeItem(entry.getValue());
+			}
+		}
+	}
+
+	private static void normalizeItem(JsonElement item)
+	{
+		if (item == null || !item.isJsonObject())
+		{
+			return;
+		}
+		JsonObject value = item.getAsJsonObject();
+		for (String property : new String[]{"q", "f", "sc"})
+		{
+			if (value.has(property) && value.get(property).isJsonNull())
+			{
+				value.remove(property);
+			}
+		}
 	}
 
 	private static void normalizeColor(JsonObject payload, String property)
