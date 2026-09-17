@@ -1,0 +1,20 @@
+diff -ruN a/inventorysetups/InventorySetupsPlugin.java b/inventorysetups/InventorySetupsPlugin.java
+--- a/inventorysetups/InventorySetupsPlugin.java	2026-09-17 09:43:24.865974045 -0500
++++ b/inventorysetups/InventorySetupsPlugin.java	2026-09-17 09:44:21.423901848 -0500
+@@ -2008,6 +2008,8 @@
+ 		if (isDeletionConfirmed("Are you sure you want to permanently delete this inventory setup?", "Warning"))
+ 		{
+ 
++			inventorySetupSyncCoordinator.onLocalSetupDeleted(setup.getSyncId());
++
+ 			// Remove the setup from any sections which have it
+ 			for (final InventorySetupsSection section : sections)
+ 			{
+@@ -2036,6 +2038,7 @@
+ 	{
+ 		if (isDeletionConfirmed("Are you sure you want to permanently delete this section? This will not delete the setups in this section.", "Warning"))
+ 		{
++			inventorySetupSyncCoordinator.onLocalSectionDeleted(section.getSyncId());
+ 			cache.removeSection(section);
+ 			sections.remove(section);
+ 			panel.redrawOverviewPanel(false);

@@ -104,9 +104,6 @@ public class InventorySetupSyncCoordinator
 			return;
 		}
 
-		// Capture deletes immediately after Inventory Setups persists the mutation. This closes the
-		// restart/poll window where a remote document could otherwise resurrect a local deletion.
-		capturePendingDeletes(repository.snapshot(plugin));
 		cancel(debounceFuture);
 		int expectedGeneration = generation;
 		debounceFuture = executor.schedule(() -> clientThread.invokeLater(() ->
@@ -116,6 +113,34 @@ public class InventorySetupSyncCoordinator
 				uploadOne(expectedGeneration);
 			}
 		}), Math.max(1, config.uploadDebounceSeconds()), TimeUnit.SECONDS);
+	}
+
+	/** Records an explicit user-confirmed deletion before Inventory Setups removes it locally. */
+	public void onLocalSetupDeleted(String setupId)
+	{
+		if (!active || setupId == null || metadata.isSetupDeletePending(setupId))
+		{
+			return;
+		}
+		SharedInventorySetup cached = metadata.setup(setupId);
+		if (cached != null && !cached.isDeleted())
+		{
+			metadata.pendingSetupDelete(setupId, cached.getRevision());
+		}
+	}
+
+	/** Records an explicit user-confirmed section deletion before Inventory Setups removes it locally. */
+	public void onLocalSectionDeleted(String sectionId)
+	{
+		if (!active || sectionId == null || metadata.isSectionDeletePending(sectionId))
+		{
+			return;
+		}
+		SharedInventorySetupSection cached = metadata.section(sectionId);
+		if (cached != null && !cached.isDeleted())
+		{
+			metadata.pendingSectionDelete(sectionId, cached.getRevision());
+		}
 	}
 
 	/** Resolves a stored setup conflict by applying the retained remote document. */
@@ -244,7 +269,6 @@ public class InventorySetupSyncCoordinator
 			return;
 		}
 		Snapshot snapshot = repository.snapshot(plugin);
-		capturePendingDeletes(snapshot);
 
 		if (!metadata.initialized() && manifest.getSetups().isEmpty() && manifest.getSections().isEmpty())
 		{
@@ -337,8 +361,14 @@ public class InventorySetupSyncCoordinator
 		{
 			String id = remote.getSetupId();
 			SharedInventorySetup local = resolvedSetups.get(id);
-			SharedInventorySetup cached = metadata.setup(id);
 			Long deleteBase = metadata.pendingSetupDeletes().get(id);
+			if (deleteBase != null && local != null)
+			{
+				stage.clearPendingSetupDeletes.add(id);
+				stage.clearSetupConflicts.add(id);
+				stage.setupPuts.put(id, remote);
+				continue;
+			}
 			if (deleteBase != null)
 			{
 				resolvedSetups.remove(id);
@@ -380,6 +410,13 @@ public class InventorySetupSyncCoordinator
 			String id = remote.getSectionId();
 			SharedInventorySetupSection local = resolvedSections.get(id);
 			Long deleteBase = metadata.pendingSectionDeletes().get(id);
+			if (deleteBase != null && local != null)
+			{
+				stage.clearPendingSectionDeletes.add(id);
+				stage.clearSectionConflicts.add(id);
+				stage.sectionPuts.put(id, remote);
+				continue;
+			}
 			if (deleteBase != null)
 			{
 				resolvedSections.remove(id);
@@ -525,28 +562,6 @@ public class InventorySetupSyncCoordinator
 		finishPoll(expectedGeneration);
 	}
 
-	private void capturePendingDeletes(Snapshot snapshot)
-	{
-		Set<String> localSetupIds = new HashSet<>(setupIds(snapshot.getSetups()));
-		for (SharedInventorySetup cached : metadata.setups().values())
-		{
-			if (!cached.isDeleted() && !localSetupIds.contains(cached.getSetupId())
-				&& !metadata.isSetupDeletePending(cached.getSetupId()))
-			{
-				metadata.pendingSetupDelete(cached.getSetupId(), cached.getRevision());
-			}
-		}
-		Set<String> localSectionIds = new HashSet<>(sectionIds(snapshot.getSections()));
-		for (SharedInventorySetupSection cached : metadata.sections().values())
-		{
-			if (!cached.isDeleted() && !localSectionIds.contains(cached.getSectionId())
-				&& !metadata.isSectionDeletePending(cached.getSectionId()))
-			{
-				metadata.pendingSectionDelete(cached.getSectionId(), cached.getRevision());
-			}
-		}
-	}
-
 	private void uploadOne(int expectedGeneration)
 	{
 		if (!isCurrent(expectedGeneration) || plugin == null || !metadata.initialized())
@@ -565,7 +580,6 @@ public class InventorySetupSyncCoordinator
 		}
 
 		Snapshot snapshot = repository.snapshot(plugin);
-		capturePendingDeletes(snapshot);
 		Map<String, SharedInventorySetup> localSetups = setupsById(snapshot.getSetups());
 		Map<String, SharedInventorySetupSection> localSections = sectionsById(snapshot.getSections());
 

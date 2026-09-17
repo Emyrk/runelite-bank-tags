@@ -36,6 +36,42 @@ public class InventorySetupSyncCoordinatorTest
 	}
 
 	@Test
+	public void onlyExplicitSetupDeletionCreatesPendingDelete() throws Exception
+	{
+		InventorySetupSyncMetadata metadata = mock(InventorySetupSyncMetadata.class);
+		SharedInventorySetup cached = new SharedInventorySetup(
+			"11111111-1111-4111-8111-111111111111", "setup", "",
+			new com.google.gson.JsonObject(), 12, false);
+		when(metadata.setup(cached.getSetupId())).thenReturn(cached);
+		InventorySetupSyncCoordinator coordinator = new InventorySetupSyncCoordinator(
+			mock(InventorySetupSyncClient.class), mock(InventorySetupRepository.class), metadata,
+			mock(BankTagsConfig.class), mock(ScheduledExecutorService.class), mock(ClientThread.class));
+		set(coordinator, "active", true);
+
+		coordinator.onLocalSetupDeleted(cached.getSetupId());
+
+		verify(metadata).pendingSetupDelete(cached.getSetupId(), 12);
+	}
+
+	@Test
+	public void onlyExplicitSectionDeletionCreatesPendingDelete() throws Exception
+	{
+		InventorySetupSyncMetadata metadata = mock(InventorySetupSyncMetadata.class);
+		SharedInventorySetupSection cached = new SharedInventorySetupSection(
+			"33333333-3333-4333-8333-333333333333", "section", null,
+			java.util.Collections.emptyList(), 9, false);
+		when(metadata.section(cached.getSectionId())).thenReturn(cached);
+		InventorySetupSyncCoordinator coordinator = new InventorySetupSyncCoordinator(
+			mock(InventorySetupSyncClient.class), mock(InventorySetupRepository.class), metadata,
+			mock(BankTagsConfig.class), mock(ScheduledExecutorService.class), mock(ClientThread.class));
+		set(coordinator, "active", true);
+
+		coordinator.onLocalSectionDeleted(cached.getSectionId());
+
+		verify(metadata).pendingSectionDelete(cached.getSectionId(), 9);
+	}
+
+	@Test
 	public void forceResyncStartsManifestPollImmediately() throws Exception
 	{
 		InventorySetupSyncClient client = mock(InventorySetupSyncClient.class);
