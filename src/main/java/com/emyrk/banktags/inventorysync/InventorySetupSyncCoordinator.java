@@ -210,6 +210,11 @@ public class InventorySetupSyncCoordinator
 
 	private void poll()
 	{
+		if (setupViewOpen())
+		{
+			schedulePoll();
+			return;
+		}
 		if (!active || !pollInFlight.compareAndSet(false, true))
 		{
 			return;
@@ -218,6 +223,11 @@ public class InventorySetupSyncCoordinator
 		Long revision = metadata.initialized() ? metadata.groupRevision() : null;
 		client.getManifest(revision, onThread(expectedGeneration, response ->
 		{
+			if (setupViewOpen())
+			{
+				finishPoll(expectedGeneration);
+				return;
+			}
 			if (response.isNotModified())
 			{
 				recoverStoredRemoteWins(expectedGeneration);
@@ -543,6 +553,11 @@ public class InventorySetupSyncCoordinator
 		{
 			return;
 		}
+		if (setupViewOpen())
+		{
+			schedulePoll();
+			return;
+		}
 		if (!uploadInFlight.compareAndSet(false, true))
 		{
 			uploadAfterPoll = true;
@@ -824,6 +839,11 @@ public class InventorySetupSyncCoordinator
 				poll();
 			}
 		}), Math.max(5, config.pollIntervalSeconds()), TimeUnit.SECONDS);
+	}
+
+	private boolean setupViewOpen()
+	{
+		return plugin != null && plugin.isInventorySetupOpen();
 	}
 
 	private boolean isCurrent(int expectedGeneration)

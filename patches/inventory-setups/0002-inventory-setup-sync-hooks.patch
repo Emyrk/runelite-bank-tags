@@ -148,13 +148,18 @@ diff -ruN a/inventorysetups/InventorySetupsPlugin.java b/inventorysetups/Invento
  		if (event.getGroup().equals(CONFIG_GROUP))
  		{
  			if (event.getKey().equals(CONFIG_KEY_PANEL_VIEW) || event.getKey().equals(CONFIG_KEY_SECTION_MODE) ||
-@@ -2666,6 +2680,40 @@
+@@ -2666,6 +2680,45 @@
  		// config will already be updated by caller so no need to update it here
  	}
  
 +	public void inventorySetupSyncChanged(boolean setupsChanged, boolean sectionsChanged)
 +	{
 +		inventorySetupSyncCoordinator.onLocalMutation(setupsChanged, sectionsChanged);
++	}
++
++	public boolean isInventorySetupOpen()
++	{
++		return panel.getCurrentSelectedSetup() != null;
 +	}
 +
 +	public void reloadInventorySetupSyncState()

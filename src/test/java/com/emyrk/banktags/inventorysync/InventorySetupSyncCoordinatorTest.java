@@ -17,6 +17,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 public class InventorySetupSyncCoordinatorTest
 {
@@ -50,6 +51,23 @@ public class InventorySetupSyncCoordinatorTest
 	}
 
 	@Test
+	public void openSetupDefersManifestPoll() throws Exception
+	{
+		InventorySetupSyncClient client = mock(InventorySetupSyncClient.class);
+		InventorySetupsPlugin plugin = mock(InventorySetupsPlugin.class);
+		when(plugin.isInventorySetupOpen()).thenReturn(true);
+		InventorySetupSyncCoordinator coordinator = new InventorySetupSyncCoordinator(
+			client, mock(InventorySetupRepository.class), mock(InventorySetupSyncMetadata.class),
+			mock(BankTagsConfig.class), mock(ScheduledExecutorService.class), mock(ClientThread.class));
+		set(coordinator, "active", true);
+		set(coordinator, "plugin", plugin);
+
+		coordinator.forceResync();
+
+		verifyNoInteractions(client);
+	}
+
+	@Test
 	public void globalSetupAndSectionOrdersAreAppliedExactly()
 	{
 		SharedInventorySetup a = new SharedInventorySetup("11111111-1111-4111-8111-111111111111", "a", "",
@@ -70,6 +88,13 @@ public class InventorySetupSyncCoordinatorTest
 		sections.put(x.getSectionId(), x); sections.put(y.getSectionId(), y);
 		assertEquals(Arrays.asList(y, x), InventorySetupSyncCoordinator.orderedSections(sections,
 			Arrays.asList(y.getSectionId(), x.getSectionId())));
+	}
+
+	private static void set(Object target, String name, Object value) throws Exception
+	{
+		Field field = target.getClass().getDeclaredField(name);
+		field.setAccessible(true);
+		field.set(target, value);
 	}
 
 	private static void set(Object target, String name, boolean value) throws Exception
