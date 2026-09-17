@@ -568,11 +568,6 @@ public class InventorySetupSyncCoordinator
 		{
 			return;
 		}
-		if (setupViewOpen())
-		{
-			schedulePoll();
-			return;
-		}
 		if (!uploadInFlight.compareAndSet(false, true))
 		{
 			uploadAfterPoll = true;

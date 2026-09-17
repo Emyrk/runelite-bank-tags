@@ -5,7 +5,9 @@ import com.emyrk.banktags.inventorysync.model.SharedInventorySetup;
 import com.emyrk.banktags.inventorysync.model.SharedInventorySetupSection;
 import inventorysetups.InventorySetupsPlugin;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -104,6 +106,31 @@ public class InventorySetupSyncCoordinatorTest
 	}
 
 	@Test
+	public void openSetupStillUploadsLocalImport() throws Exception
+	{
+		InventorySetupSyncClient client = mock(InventorySetupSyncClient.class);
+		InventorySetupRepository repository = mock(InventorySetupRepository.class);
+		InventorySetupSyncMetadata metadata = mock(InventorySetupSyncMetadata.class);
+		InventorySetupsPlugin plugin = mock(InventorySetupsPlugin.class);
+		when(plugin.isInventorySetupOpen()).thenReturn(true);
+		when(metadata.initialized()).thenReturn(true);
+		SharedInventorySetup local = new SharedInventorySetup(
+			"11111111-1111-4111-8111-111111111111", "imported", "",
+			new com.google.gson.JsonObject(), 0, false);
+		when(repository.snapshot(plugin)).thenReturn(new InventorySetupRepository.Snapshot(
+			Collections.singletonList(local), Collections.emptyList()));
+		InventorySetupSyncCoordinator coordinator = new InventorySetupSyncCoordinator(
+			client, repository, metadata, mock(BankTagsConfig.class),
+			mock(ScheduledExecutorService.class), mock(ClientThread.class));
+		set(coordinator, "active", true);
+		set(coordinator, "plugin", plugin);
+
+		invoke(coordinator, "uploadOne", 0);
+
+		verify(client).createSetup(any(), any());
+	}
+
+	@Test
 	public void globalSetupAndSectionOrdersAreAppliedExactly()
 	{
 		SharedInventorySetup a = new SharedInventorySetup("11111111-1111-4111-8111-111111111111", "a", "",
@@ -124,6 +151,13 @@ public class InventorySetupSyncCoordinatorTest
 		sections.put(x.getSectionId(), x); sections.put(y.getSectionId(), y);
 		assertEquals(Arrays.asList(y, x), InventorySetupSyncCoordinator.orderedSections(sections,
 			Arrays.asList(y.getSectionId(), x.getSectionId())));
+	}
+
+	private static void invoke(Object target, String name, int value) throws Exception
+	{
+		Method method = target.getClass().getDeclaredMethod(name, int.class);
+		method.setAccessible(true);
+		method.invoke(target, value);
 	}
 
 	private static void set(Object target, String name, Object value) throws Exception
