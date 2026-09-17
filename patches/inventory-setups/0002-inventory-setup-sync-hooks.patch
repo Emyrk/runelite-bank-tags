@@ -148,7 +148,7 @@ diff -ruN a/inventorysetups/InventorySetupsPlugin.java b/inventorysetups/Invento
  		if (event.getGroup().equals(CONFIG_GROUP))
  		{
  			if (event.getKey().equals(CONFIG_KEY_PANEL_VIEW) || event.getKey().equals(CONFIG_KEY_SECTION_MODE) ||
-@@ -2666,6 +2680,18 @@
+@@ -2666,6 +2680,40 @@
  		// config will already be updated by caller so no need to update it here
  	}
  
@@ -159,9 +159,31 @@ diff -ruN a/inventorysetups/InventorySetupsPlugin.java b/inventorysetups/Invento
 +
 +	public void reloadInventorySetupSyncState()
 +	{
++		final InventorySetup selectedSetup = panel.getCurrentSelectedSetup();
++		final String selectedSyncId = selectedSetup == null ? null : selectedSetup.getSyncId();
 +		dataManager.loadConfig();
++		InventorySetup reloadedSelection = null;
++		if (selectedSyncId != null)
++		{
++			for (InventorySetup setup : inventorySetups)
++			{
++				if (selectedSyncId.equals(setup.getSyncId()))
++				{
++					reloadedSelection = setup;
++					break;
++				}
++			}
++		}
 +		broadcastSetupsChanged();
-+		SwingUtilities.invokeLater(() -> panel.redrawOverviewPanel(true));
++		final InventorySetup selectionToRestore = reloadedSelection;
++		SwingUtilities.invokeLater(() ->
++		{
++			panel.redrawOverviewPanel(selectionToRestore == null);
++			if (selectionToRestore != null)
++			{
++				panel.setCurrentInventorySetup(selectionToRestore, false);
++			}
++		});
 +	}
 +
  	// Called by the data manager whenever setups are persisted; the handler decides whether a broadcast
