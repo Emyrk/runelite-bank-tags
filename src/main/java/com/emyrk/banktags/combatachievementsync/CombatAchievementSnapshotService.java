@@ -7,6 +7,7 @@ import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.Client;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.util.Text;
 
 /** Reads an exact Combat Achievement snapshot from RuneLite client state. Client thread only. */
@@ -38,7 +39,8 @@ public class CombatAchievementSnapshotService
 				completed.add(task.getId());
 			}
 		}
-		return new CombatAchievementProgress(playerName, client.getRevision(), completed);
+		int achievementPoints = Math.max(0, client.getVarbitValue(VarbitID.CA_POINTS));
+		return new CombatAchievementProgress(playerName, client.getRevision(), achievementPoints, completed);
 	}
 
 	static String normalizePlayerName(@Nullable String username)

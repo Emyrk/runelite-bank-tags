@@ -176,10 +176,10 @@ Section membership is represented by ordered stable setup IDs and permits one se
 `com.emyrk.banktags.combatachievementsync` is an upload-only boundary independent from bank-tag and Inventory Setup reconciliation:
 
 - `CombatAchievementCatalog` contains the explicit generated list of 399 RuneLite `VarbitID.CA_TASK_*_COMPLETED` constants and the relevant `VarPlayerID.CA_TASK_COMPLETED_0..19` event sources. Runtime reflection is not used.
-- `CombatAchievementSnapshotService` normalizes the tag-free `Client.getUsername()`, reads `Client.getRevision()`, and emits the ordered exact IDs whose task varbits are nonzero.
+- `CombatAchievementSnapshotService` normalizes the tag-free `Client.getUsername()`, reads `Client.getRevision()` and the nonnegative `VarbitID.CA_POINTS` total, and emits the ordered exact IDs whose task varbits are nonzero.
 - `CombatAchievementProgress` is the immutable schema-v1 model. `CombatAchievementSyncJson` writes the request body with injected Gson.
 - `CombatAchievementSyncClient` asynchronously sends `PUT /api/group/{group}/combat-achievements/snapshot` with the existing raw `Authorization` token through injected OkHttp. It owns no threads, ignores successful response bodies, tags its calls, and supports cancellation.
-- `CombatAchievementSyncCoordinator` starts whenever `BankTagsConfig.enabled()` and nonblank credentials permit. It uploads on startup if already logged in and on every `LOGGED_IN` event, debounces completion varp changes with the existing upload debounce setting, and serializes requests. If a request is in flight, intervening triggers collapse into one fresh latest snapshot after it completes. Nonlogged states, config restarts, and shutdown clear pending state and cancel calls. Force resync uploads immediately.
+- `CombatAchievementSyncCoordinator` starts whenever `BankTagsConfig.enabled()` and nonblank credentials permit. It uploads on startup if already logged in and on every `LOGGED_IN` event, debounces completion varp, task varbit, and achievement-point changes with the existing upload debounce setting, and serializes requests. If a request is in flight, intervening triggers collapse into one fresh latest snapshot after it completes. Nonlogged states, config restarts, and shutdown clear pending state and cancel calls. Force resync uploads immediately.
 
 `BankTagsPlugin` forwards `GameStateChanged` and `VarbitChanged` events to this coordinator and includes it in lifecycle, config restart, and force-resync handling. No new config key exists.
 

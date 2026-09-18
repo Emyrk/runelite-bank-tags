@@ -8,6 +8,7 @@ import java.util.Collections;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.client.callback.ClientThread;
 import org.junit.Before;
@@ -105,6 +106,23 @@ public class CombatAchievementSyncCoordinatorTest
 	}
 
 	@Test
+	public void achievementPointChangeSchedulesUpload()
+	{
+		when(client.getGameState()).thenReturn(GameState.LOGIN_SCREEN);
+		when(snapshots.snapshot()).thenReturn(null, progress("points"));
+		coordinator.start();
+		coordinator.onGameStateChanged(GameState.LOGGED_IN);
+
+		VarbitChanged changed = new VarbitChanged();
+		changed.setVarbitId(VarbitID.CA_POINTS);
+		coordinator.onVarbitChanged(changed);
+
+		assertEquals(1, executor.pendingCount());
+		executor.runDue(1);
+		verify(syncClient).putProgress(any(CombatAchievementProgress.class), any());
+	}
+
+	@Test
 	public void unrelatedVarpDoesNotScheduleUpload()
 	{
 		when(client.getGameState()).thenReturn(GameState.LOGIN_SCREEN);
@@ -152,6 +170,6 @@ public class CombatAchievementSyncCoordinatorTest
 
 	private static CombatAchievementProgress progress(String id)
 	{
-		return new CombatAchievementProgress("Display Name", 123, Collections.singletonList(id));
+		return new CombatAchievementProgress("Display Name", 123, 456, Collections.singletonList(id));
 	}
 }

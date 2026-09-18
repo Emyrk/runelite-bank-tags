@@ -145,6 +145,7 @@ Combat Achievement progress is an independent latest-only snapshot. It uses the 
   "schemaVersion": 1,
   "playerName": "Display Name",
   "clientRevision": 123,
+  "achievementPoints": 456,
   "completedTaskIds": ["CA_TASK_ABBERANT_SPECTRE_KILLCOUNT_1_COMPLETED"]
 }
 ```
@@ -158,8 +159,9 @@ Client rules:
 - `schemaVersion` is `1`.
 - `playerName` is the normalized, tag-free value of `Client.getUsername()`, preserving display case.
 - `clientRevision` is `Client.getRevision()`.
+- `achievementPoints` is the nonnegative total read from `Client.getVarbitValue(VarbitID.CA_POINTS)`.
 - `completedTaskIds` is the exact ordered subset of the explicit RuneLite `VarbitID.CA_TASK_*_COMPLETED` catalog whose varbits are nonzero. Names are sent, not numeric varbit values.
-- The plugin uploads a full snapshot at startup when already logged in and after every `GameStateChanged.LOGGED_IN` event. Relevant completion varp changes are debounced.
+- The plugin uploads a full snapshot at startup when already logged in and after every `GameStateChanged.LOGGED_IN` event. Relevant completion varp, task varbit, and `VarbitID.CA_POINTS` changes are debounced.
 - Requests are serialized. If state changes while a request is in flight, one fresh latest snapshot follows it.
 - Leaving `LOGGED_IN`, disabling sync, changing credentials, or shutting down cancels pending and in-flight work. `Force resync` queues an immediate full snapshot.
 - Combat Achievement synchronization uses the existing `enabled` setting and group credentials. There is no separate config key or toggle.

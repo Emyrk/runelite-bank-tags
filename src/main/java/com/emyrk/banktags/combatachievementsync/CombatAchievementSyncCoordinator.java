@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.events.VarbitChanged;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.callback.ClientThread;
 
 /** Coordinates latest-only exact Combat Achievement progress uploads. */
@@ -87,7 +88,8 @@ public class CombatAchievementSyncCoordinator
 	public void onVarbitChanged(VarbitChanged event)
 	{
 		if (!active || !loggedIn || (!CombatAchievementCatalog.isCompletionVarp(event.getVarpId())
-			&& !CombatAchievementCatalog.isTaskVarbit(event.getVarbitId())))
+			&& !CombatAchievementCatalog.isTaskVarbit(event.getVarbitId())
+			&& event.getVarbitId() != VarbitID.CA_POINTS))
 		{
 			return;
 		}

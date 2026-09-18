@@ -53,9 +53,9 @@ Once synchronization is enabled and credentials are configured, RuneLite synchro
 
 Combat Achievement synchronization is enabled by the existing `BankTagsConfig.enabled()` group-sync toggle. It has no separate config key. A nonblank group name and token are also required.
 
-The client sends a latest-only full snapshot containing schema version 1, the normalized current `Client.getUsername()` display name, `Client.getRevision()`, and the exact completed IDs from an explicit generated catalog of RuneLite `VarbitID.CA_TASK_*_COMPLETED` constants. The catalog uses gameval constants directly and does not use reflection.
+The client sends a latest-only full snapshot containing schema version 1, the normalized current `Client.getUsername()` display name, `Client.getRevision()`, the nonnegative total from `VarbitID.CA_POINTS`, and the exact completed IDs from an explicit generated catalog of RuneLite `VarbitID.CA_TASK_*_COMPLETED` constants. The catalog uses gameval constants directly and does not use reflection.
 
-A full snapshot uploads on plugin startup when already logged in and on each `LOGGED_IN` game-state event. Changes to the Combat Achievement completion varps are debounced. Only one request is in flight; any intervening changes coalesce into one fresh snapshot immediately afterward. Leaving the logged-in state clears pending work and cancels owned HTTP calls. Force resync uploads immediately when active.
+A full snapshot uploads on plugin startup when already logged in and on each `LOGGED_IN` game-state event. Changes to the Combat Achievement completion varps, task varbits, or `VarbitID.CA_POINTS` are debounced. Only one request is in flight; any intervening changes coalesce into one fresh snapshot immediately afterward. Leaving the logged-in state clears pending work and cancels owned HTTP calls. Force resync uploads immediately when active.
 
 ## Isolated local storage
 

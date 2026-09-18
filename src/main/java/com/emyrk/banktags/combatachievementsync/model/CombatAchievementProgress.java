@@ -13,12 +13,19 @@ public final class CombatAchievementProgress
 
 	private final String playerName;
 	private final int clientRevision;
+	private final int achievementPoints;
 	private final List<String> completedTaskIds;
 
-	public CombatAchievementProgress(String playerName, int clientRevision, List<String> completedTaskIds)
+	public CombatAchievementProgress(String playerName, int clientRevision, int achievementPoints,
+		List<String> completedTaskIds)
 	{
+		if (achievementPoints < 0)
+		{
+			throw new IllegalArgumentException("achievementPoints must be nonnegative");
+		}
 		this.playerName = Objects.requireNonNull(playerName, "playerName");
 		this.clientRevision = clientRevision;
+		this.achievementPoints = achievementPoints;
 		this.completedTaskIds = Collections.unmodifiableList(
 			new ArrayList<>(new LinkedHashSet<>(Objects.requireNonNull(completedTaskIds, "completedTaskIds"))));
 	}
@@ -31,6 +38,11 @@ public final class CombatAchievementProgress
 	public int getClientRevision()
 	{
 		return clientRevision;
+	}
+
+	public int getAchievementPoints()
+	{
+		return achievementPoints;
 	}
 
 	public List<String> getCompletedTaskIds()

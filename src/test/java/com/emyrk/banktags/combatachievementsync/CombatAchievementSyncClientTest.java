@@ -53,7 +53,7 @@ public class CombatAchievementSyncClientTest
 	{
 		server.enqueue(new MockResponse().setResponseCode(204));
 		Await callback = new Await();
-		client.putProgress(new CombatAchievementProgress("Display Name", 123,
+		client.putProgress(new CombatAchievementProgress("Display Name", 123, 456,
 			Collections.singletonList("CA_TASK_ABBERANT_SPECTRE_KILLCOUNT_1_COMPLETED")), callback);
 		callback.success();
 
@@ -65,6 +65,7 @@ public class CombatAchievementSyncClientTest
 		assertEquals(1, body.get("schemaVersion").getAsInt());
 		assertEquals("Display Name", body.get("playerName").getAsString());
 		assertEquals(123, body.get("clientRevision").getAsInt());
+		assertEquals(456, body.get("achievementPoints").getAsInt());
 		assertEquals("CA_TASK_ABBERANT_SPECTRE_KILLCOUNT_1_COMPLETED",
 			body.getAsJsonArray("completedTaskIds").get(0).getAsString());
 	}

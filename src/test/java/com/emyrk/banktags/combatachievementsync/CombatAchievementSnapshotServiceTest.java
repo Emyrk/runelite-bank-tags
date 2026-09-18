@@ -18,6 +18,7 @@ public class CombatAchievementSnapshotServiceTest
 		Client client = mock(Client.class);
 		when(client.getUsername()).thenReturn(" <col=ff0000>Display\u00a0 Name</col> ");
 		when(client.getRevision()).thenReturn(123);
+		when(client.getVarbitValue(VarbitID.CA_POINTS)).thenReturn(456);
 		when(client.getVarbitValue(VarbitID.CA_TASK_ABBERANT_SPECTRE_KILLCOUNT_1_COMPLETED)).thenReturn(1);
 		when(client.getVarbitValue(VarbitID.CA_TASK_LIZARDMAN_SHAMAN_PERFECTION_1_COMPLETED)).thenReturn(1);
 
@@ -25,9 +26,22 @@ public class CombatAchievementSnapshotServiceTest
 
 		assertEquals("Display Name", progress.getPlayerName());
 		assertEquals(123, progress.getClientRevision());
+		assertEquals(456, progress.getAchievementPoints());
 		assertEquals(Arrays.asList(
 			"CA_TASK_ABBERANT_SPECTRE_KILLCOUNT_1_COMPLETED",
 			"CA_TASK_LIZARDMAN_SHAMAN_PERFECTION_1_COMPLETED"), progress.getCompletedTaskIds());
+	}
+
+	@Test
+	public void negativeAchievementPointsAreClampedToZero()
+	{
+		Client client = mock(Client.class);
+		when(client.getUsername()).thenReturn("Display Name");
+		when(client.getVarbitValue(VarbitID.CA_POINTS)).thenReturn(-1);
+
+		CombatAchievementProgress progress = new CombatAchievementSnapshotService(client).snapshot();
+
+		assertEquals(0, progress.getAchievementPoints());
 	}
 
 	@Test

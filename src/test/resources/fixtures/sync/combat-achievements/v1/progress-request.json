@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "playerName": "Display Name",
   "clientRevision": 123,
+  "achievementPoints": 456,
   "completedTaskIds": [
     "CA_TASK_ABBERANT_SPECTRE_KILLCOUNT_1_COMPLETED",
     "CA_TASK_LIZARDMAN_SHAMAN_PERFECTION_1_COMPLETED"

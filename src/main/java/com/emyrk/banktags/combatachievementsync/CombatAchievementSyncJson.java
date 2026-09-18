@@ -25,6 +25,7 @@ public class CombatAchievementSyncJson
 		object.addProperty("schemaVersion", CombatAchievementProgress.SCHEMA_VERSION);
 		object.addProperty("playerName", progress.getPlayerName());
 		object.addProperty("clientRevision", progress.getClientRevision());
+		object.addProperty("achievementPoints", progress.getAchievementPoints());
 		JsonArray completed = new JsonArray();
 		for (String taskId : progress.getCompletedTaskIds())
 		{

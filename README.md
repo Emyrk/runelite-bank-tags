@@ -12,7 +12,7 @@ The initial implementation tracks RuneLite's built-in Bank Tags plugin and uses 
 
 The optional **Enable group sync** setting shares bank-tag organization and exact per-task Combat Achievement progress through the configured Group Ironmen server. Combat Achievement sync uses the same group name and token and has no separate toggle. It runs only while group sync is enabled, credentials are present, and the client is logged in.
 
-The Combat Achievement upload contains the normalized current player's display name, RuneLite client revision, and the exact completed `CA_TASK_*_COMPLETED` gameval IDs. It does not include bank contents, inventory, equipment, location, credentials, or session tokens. Uploads are asynchronous, debounced after completion changes, and coalesced so the newest full snapshot follows any request already in flight.
+The Combat Achievement upload contains the normalized current player's display name, RuneLite client revision, total achievement points, and the exact completed `CA_TASK_*_COMPLETED` gameval IDs. It does not include bank contents, inventory, equipment, location, credentials, or session tokens. Uploads are asynchronous, debounced after completion changes, and coalesced so the newest full snapshot follows any request already in flight.
 
 ## Bundled Inventory Setups
 
