@@ -8,6 +8,12 @@ The initial implementation tracks RuneLite's built-in Bank Tags plugin and uses 
 
 **Disable RuneLite's built-in Bank Tags plugin before enabling Bank Tags Extended.** Running both plugins together is unsupported because both plugins modify the same bank interface. The fork uses its own configuration after the one-time import.
 
+## Group synchronization
+
+The optional **Enable group sync** setting shares bank-tag organization and exact per-task Combat Achievement progress through the configured Group Ironmen server. Combat Achievement sync uses the same group name and token and has no separate toggle. It runs only while group sync is enabled, credentials are present, and the client is logged in.
+
+The Combat Achievement upload contains the normalized current player's display name, RuneLite client revision, and the exact completed `CA_TASK_*_COMPLETED` gameval IDs. It does not include bank contents, inventory, equipment, location, credentials, or session tokens. Uploads are asynchronous, debounced after completion changes, and coalesced so the newest full snapshot follows any request already in flight.
+
 ## Bundled Inventory Setups
 
 The release JAR also contains a pinned, compatibility-patched build of the upstream Inventory Setups plugin. It uses Bank Tags Extended instead of enabling RuneLite's built-in Bank Tags plugin. Inventory Setups keeps its existing `inventorysetups` configuration group, so existing setups remain available.

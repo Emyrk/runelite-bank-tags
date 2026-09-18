@@ -30,8 +30,12 @@ import com.google.inject.testing.fieldbinder.BoundFieldModule;
 import javax.inject.Inject;
 import javax.inject.Named;
 import net.runelite.api.Client;
+import net.runelite.api.GameState;
+import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.ScriptCallbackEvent;
+import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.gameval.ItemID;
+import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.client.chat.ChatMessageManager;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.config.RuneLiteConfig;
@@ -39,6 +43,7 @@ import net.runelite.client.callback.ClientThread;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.game.ItemManager;
 import static com.emyrk.banktags.BankTagsPlugin.ITEM_KEY_PREFIX;
+import com.emyrk.banktags.combatachievementsync.CombatAchievementSyncCoordinator;
 import com.emyrk.banktags.inventorysync.InventorySetupSyncCoordinator;
 import com.emyrk.banktags.sync.BankTagSyncCoordinator;
 import com.emyrk.banktags.tabs.TabInterface;
@@ -110,6 +115,10 @@ public class BankTagsPluginTest
 	@Mock
 	@Bind
 	private InventorySetupSyncCoordinator inventorySetupSyncCoordinator;
+
+	@Mock
+	@Bind
+	private CombatAchievementSyncCoordinator combatAchievementSyncCoordinator;
 
 	@Bind
 	@Named("developerMode")
@@ -197,6 +206,28 @@ public class BankTagsPluginTest
 	}
 
 	@Test
+	public void gameStateChangesAreForwardedToCombatAchievementSync()
+	{
+		GameStateChanged event = new GameStateChanged();
+		event.setGameState(GameState.LOGGED_IN);
+
+		bankTagsPlugin.onGameStateChanged(event);
+
+		verify(combatAchievementSyncCoordinator).onGameStateChanged(GameState.LOGGED_IN);
+	}
+
+	@Test
+	public void varbitChangesAreForwardedToCombatAchievementSync()
+	{
+		VarbitChanged event = new VarbitChanged();
+		event.setVarpId(VarPlayerID.CA_TASK_COMPLETED_0);
+
+		bankTagsPlugin.onVarbitChanged(event);
+
+		verify(combatAchievementSyncCoordinator).onVarbitChanged(event);
+	}
+
+	@Test
 	public void configChangeToggleRestartsCoordinator()
 	{
 		ConfigChanged event = new ConfigChanged();
@@ -206,9 +237,11 @@ public class BankTagsPluginTest
 
 		bankTagsPlugin.onConfigChanged(event);
 
-		InOrder order = inOrder(syncCoordinator);
+		InOrder order = inOrder(syncCoordinator, combatAchievementSyncCoordinator);
 		order.verify(syncCoordinator).stop();
 		order.verify(syncCoordinator).start();
+		order.verify(combatAchievementSyncCoordinator).stop();
+		order.verify(combatAchievementSyncCoordinator).start();
 		verify(clientThread).invokeLater(org.mockito.ArgumentMatchers.any(Runnable.class));
 	}
 
@@ -271,6 +304,7 @@ public class BankTagsPluginTest
 		verify(configManager).setConfiguration(BankTagsStorage.SYNC_SETTINGS_GROUP, "forceResync", false);
 		verify(syncCoordinator).forceResync();
 		verify(inventorySetupSyncCoordinator).forceResync();
+		verify(combatAchievementSyncCoordinator).forceResync();
 	}
 
 	@Test
@@ -283,7 +317,7 @@ public class BankTagsPluginTest
 
 		bankTagsPlugin.onConfigChanged(event);
 
-		verifyNoInteractions(syncCoordinator, inventorySetupSyncCoordinator);
+		verifyNoInteractions(syncCoordinator, inventorySetupSyncCoordinator, combatAchievementSyncCoordinator);
 	}
 
 	@Test

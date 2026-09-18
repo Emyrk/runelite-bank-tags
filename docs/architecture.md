@@ -4,7 +4,7 @@
 
 Bank Tags Extended is a standalone external RuneLite plugin based on RuneLite's built-in Bank Tags plugin. It replaces the built-in plugin's bank tag UI and stores an independent copy of its configuration under `emyrk-bank-tags`.
 
-The plugin optionally synchronizes tag data through the groupiron.men API. Local tag data, synchronized cache data, connection settings, and sync metadata remain durable through RuneLite's `ConfigManager`.
+The plugin optionally synchronizes tag data, Inventory Setups, and exact Combat Achievement progress through the groupiron.men API. Local tag data, synchronized cache data, connection settings, and sync metadata remain durable through RuneLite's `ConfigManager`; Combat Achievement progress is uploaded as a latest-only snapshot and is not persisted locally by this plugin.
 
 ## Bundled Inventory Setups companion
 
@@ -23,11 +23,11 @@ On startup it:
 3. Registers custom tab sprites.
 4. Registers `TabInterface`, `LayoutManager`, and `PotionStorage` event subscribers.
 5. Reinitializes the bank interface on the client thread.
-6. Calls `BankTagSyncCoordinator.start()`, which is a no-op unless sync is enabled and configured.
+6. Calls `BankTagSyncCoordinator.start()` and `CombatAchievementSyncCoordinator.start()`. Both are no-ops unless group sync is enabled and configured. The Combat Achievement coordinator immediately uploads when the client is already logged in.
 
-On shutdown it stops the coordinator first (cancelling polling, debounces, and in-flight requests), then unregisters those components, removes custom widgets and sprite overrides, and reinitializes the normal bank interface.
+On shutdown it stops both coordinators first, cancelling polling, debounces, and in-flight requests, then unregisters those components, removes custom widgets and sprite overrides, and reinitializes the normal bank interface.
 
-RuneLite displays one configuration proxy per plugin, so `BankTagsConfig` is the single visible configuration interface. It uses `emyrk-bank-tags-sync-settings` for both local UI preferences and sync connection settings, while tag data remains in `emyrk-bank-tags` or `emyrk-bank-tags-sync`. On upgrade, existing UI preferences are copied once from `emyrk-bank-tags` when the destination key is absent. A sync-related `ConfigChanged` event stops and restarts the coordinator. When the `enabled` flag flips, the plugin also reloads `TabManager` and reinitializes the bank because `BankTagsStorage.getActiveGroup()` switches repositories immediately.
+RuneLite displays one configuration proxy per plugin, so `BankTagsConfig` is the single visible configuration interface. It uses `emyrk-bank-tags-sync-settings` for both local UI preferences and sync connection settings, while tag data remains in `emyrk-bank-tags` or `emyrk-bank-tags-sync`. On upgrade, existing UI preferences are copied once from `emyrk-bank-tags` when the destination key is absent. A sync-related `ConfigChanged` event stops and restarts both coordinators. When the `enabled` flag flips, the plugin also reloads `TabManager` and reinitializes the bank because `BankTagsStorage.getActiveGroup()` switches repositories immediately. Combat Achievement synchronization intentionally has no separate toggle and follows `enabled`.
 
 The `resetSyncCache` item in that group is a self-resetting action (RuneLite config panels have no buttons; its `warning` is the confirmation dialog). When its value becomes `true` the plugin immediately writes it back to `false`, stops the coordinator, calls `BankTagsStorage.resetSyncStorage()` (which unsets every `emyrk-bank-tags-sync.*` key: tag data, `sync*` metadata, and the `syncStorageInitialized` marker, never touching `emyrk-bank-tags` or `banktags`), then on the client thread reloads `TabManager`, reinitializes the bank, and starts the coordinator again, which re-runs the first-enable path and reloads the group's tags from the server. The write-back event (`false`) is ignored so the coordinator is not restarted twice.
 
@@ -170,6 +170,18 @@ The bundled Inventory Setups sources remain owned by the pinned vendor submodule
 - `InventorySetupSyncCoordinator` polls manifests, debounces local writes, applies conflict and tombstone rules, suppresses feedback during remote application, and hops every plugin or `ConfigManager` operation to the client thread.
 
 Section membership is represented by ordered stable setup IDs and permits one setup in multiple sections. Section expansion state (`isMaximized`) never enters the wire document and is restored by section ID during remote application.
+
+### Combat Achievement synchronization
+
+`com.emyrk.banktags.combatachievementsync` is an upload-only boundary independent from bank-tag and Inventory Setup reconciliation:
+
+- `CombatAchievementCatalog` contains the explicit generated list of 399 RuneLite `VarbitID.CA_TASK_*_COMPLETED` constants and the relevant `VarPlayerID.CA_TASK_COMPLETED_0..19` event sources. Runtime reflection is not used.
+- `CombatAchievementSnapshotService` normalizes the tag-free `Client.getUsername()`, reads `Client.getRevision()`, and emits the ordered exact IDs whose task varbits are nonzero.
+- `CombatAchievementProgress` is the immutable schema-v1 model. `CombatAchievementSyncJson` writes the request body with injected Gson.
+- `CombatAchievementSyncClient` asynchronously sends `PUT /api/group/{group}/combat-achievements/snapshot` with the existing raw `Authorization` token through injected OkHttp. It owns no threads, ignores successful response bodies, tags its calls, and supports cancellation.
+- `CombatAchievementSyncCoordinator` starts whenever `BankTagsConfig.enabled()` and nonblank credentials permit. It uploads on startup if already logged in and on every `LOGGED_IN` event, debounces completion varp changes with the existing upload debounce setting, and serializes requests. If a request is in flight, intervening triggers collapse into one fresh latest snapshot after it completes. Nonlogged states, config restarts, and shutdown clear pending state and cancel calls. Force resync uploads immediately.
+
+`BankTagsPlugin` forwards `GameStateChanged` and `VarbitChanged` events to this coordinator and includes it in lifecycle, config restart, and force-resync handling. No new config key exists.
 
 ### Sync status, backoff, and recovery (Milestone 3c)
 

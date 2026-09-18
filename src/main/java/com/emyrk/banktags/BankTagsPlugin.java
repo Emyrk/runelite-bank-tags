@@ -45,9 +45,11 @@ import net.runelite.api.Client;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
+import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GrandExchangeSearched;
 import net.runelite.api.events.MenuEntryAdded;
 import net.runelite.api.events.ScriptCallbackEvent;
+import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.VarClientID;
@@ -64,6 +66,7 @@ import net.runelite.client.game.chatbox.ChatboxPanelManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.bank.BankSearch;
+import com.emyrk.banktags.combatachievementsync.CombatAchievementSyncCoordinator;
 import com.emyrk.banktags.inventorysync.InventorySetupSyncCoordinator;
 import com.emyrk.banktags.sync.BankTagSyncCoordinator;
 import com.emyrk.banktags.tabs.Layout;
@@ -77,8 +80,8 @@ import net.runelite.client.util.Text;
 @PluginDescriptor(
 	name = "Bank Tags Extended",
 	configName = "bankTagsExtended",
-	description = "A standalone replacement for RuneLite bank tags",
-	tags = {"searching", "tagging"},
+	description = "Extended bank tags with optional group sync for tags and Combat Achievements",
+	tags = {"searching", "tagging", "combat achievements", "group ironman"},
 	conflicts = {"Bank Tags"}
 )
 public class BankTagsPlugin extends Plugin implements BankTagsService
@@ -171,6 +174,9 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 	private InventorySetupSyncCoordinator inventorySetupSyncCoordinator;
 
 	@Inject
+	private CombatAchievementSyncCoordinator combatAchievementSyncCoordinator;
+
+	@Inject
 	private BankTagsStorage storage;
 
 	@Inject
@@ -255,11 +261,13 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 		layoutManager.register();
 		clientThread.invokeLater(this::reinitBank);
 		syncCoordinator.start();
+		combatAchievementSyncCoordinator.start();
 	}
 
 	@Override
 	public void shutDown()
 	{
+		combatAchievementSyncCoordinator.stop();
 		syncCoordinator.stop();
 		eventBus.unregister(tabInterface);
 		layoutManager.unregister();
@@ -564,6 +572,18 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 	}
 
 	@Subscribe
+	public void onGameStateChanged(GameStateChanged event)
+	{
+		combatAchievementSyncCoordinator.onGameStateChanged(event.getGameState());
+	}
+
+	@Subscribe
+	public void onVarbitChanged(VarbitChanged event)
+	{
+		combatAchievementSyncCoordinator.onVarbitChanged(event);
+	}
+
+	@Subscribe
 	public void onConfigChanged(ConfigChanged configChanged)
 	{
 		if (!BankTagsStorage.SYNC_SETTINGS_GROUP.equals(configChanged.getGroup()))
@@ -583,6 +603,7 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 				configManager.setConfiguration(BankTagsStorage.SYNC_SETTINGS_GROUP, FORCE_RESYNC_KEY, false);
 				syncCoordinator.forceResync();
 				inventorySetupSyncCoordinator.forceResync();
+				combatAchievementSyncCoordinator.forceResync();
 			}
 			return;
 		}
@@ -602,6 +623,8 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 
 		syncCoordinator.stop();
 		syncCoordinator.start();
+		combatAchievementSyncCoordinator.stop();
+		combatAchievementSyncCoordinator.start();
 		if ("enabled".equals(configChanged.getKey()))
 		{
 			// BankTagsStorage.getActiveGroup() switches repositories the moment the flag flips

@@ -30,6 +30,14 @@ public class BankTagsConfigTest
 			"useTabs", "rememberTab", "removeTabSeparators", "preventTagTabDrags",
 			"enabled", "groupName", "groupToken", "serverBaseUrl",
 			"pollIntervalSeconds", "uploadDebounceSeconds", "forceResync", "resetSyncCache")));
+		assertFalse(visibleKeys.stream().anyMatch(key -> key.toLowerCase().contains("combat")));
+
+		Method enabled = Arrays.stream(BankTagsConfig.class.getMethods())
+			.filter(method -> method.getName().equals("enabled"))
+			.findFirst()
+			.orElseThrow(AssertionError::new);
+		assertEquals("This feature submits your IP address to a 3rd-party server not controlled or verified by RuneLite developers",
+			enabled.getAnnotation(ConfigItem.class).warning());
 
 		Method groupToken = Arrays.stream(BankTagsConfig.class.getMethods())
 			.filter(method -> method.getName().equals("groupToken"))

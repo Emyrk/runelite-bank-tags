@@ -8,12 +8,13 @@ This document records the intended boundary and the decisions that must be made 
 
 Allow members of one Group Ironman group to use the same bank tag organization across separate RuneLite clients.
 
-The initial shared-data candidates are:
+The shared data includes:
 
 - Item-to-tag associations.
 - Ordered tag tabs.
 - Tab icon item IDs.
 - Per-tag item layouts.
+- Exact per-player Combat Achievement task completion snapshots.
 
 The plugin should continue to work from an isolated synchronized RuneLite configuration cache when offline. Remote synchronization must never overwrite the built-in `banktags` group or the existing `emyrk-bank-tags` local data.
 
@@ -32,7 +33,7 @@ The shared organization also includes optional one-level folders. A folder synch
 ## Non-goals
 
 - Synchronizing actual bank contents or quantities.
-- Tracking player location, equipment, activity, or other gameplay state.
+- Tracking player location, equipment, activity, or gameplay state other than the explicitly approved Combat Achievement task completion snapshot.
 - Discovering Group Ironman membership from other players.
 - Storing Jagex or RuneLite credentials.
 - Making network availability a requirement for opening or using the bank.
@@ -47,6 +48,14 @@ Once synchronization is enabled and credentials are configured, RuneLite synchro
 - Compound actions are debounced so intermediate config writes are not uploaded.
 - A conflict blocks only that tag. Other tags continue syncing.
 - Normal gameplay does not require manual save or retrieve actions.
+
+## Combat Achievement synchronization
+
+Combat Achievement synchronization is enabled by the existing `BankTagsConfig.enabled()` group-sync toggle. It has no separate config key. A nonblank group name and token are also required.
+
+The client sends a latest-only full snapshot containing schema version 1, the normalized current `Client.getUsername()` display name, `Client.getRevision()`, and the exact completed IDs from an explicit generated catalog of RuneLite `VarbitID.CA_TASK_*_COMPLETED` constants. The catalog uses gameval constants directly and does not use reflection.
+
+A full snapshot uploads on plugin startup when already logged in and on each `LOGGED_IN` game-state event. Changes to the Combat Achievement completion varps are debounced. Only one request is in flight; any intervening changes coalesce into one fresh snapshot immediately afterward. Leaving the logged-in state clears pending work and cancels owned HTTP calls. Force resync uploads immediately when active.
 
 ## Isolated local storage
 
@@ -158,7 +167,7 @@ Operations needing special attention:
 
 ## Group identity and authentication
 
-Decided: a group is identified by the existing groupiron.men group name and authenticated by the existing group token sent as `Authorization: <group token>`, nothing else. Anyone holding the token may read and edit bank tags. The plugin sends no RuneLite or Jagex credentials, no character name, and no other identifier. Do not place server secrets in the repository. Do not log authorization headers or tokens.
+Decided: a group is identified by the existing groupiron.men group name and authenticated by the existing group token sent as `Authorization: <group token>`, nothing else. Anyone holding the token may read and edit synchronized group data. The plugin sends no RuneLite or Jagex credentials or session tokens. Combat Achievement progress intentionally includes the normalized current player's display name so snapshots can be attributed within the group. Do not place server secrets in the repository. Do not log authorization headers, tokens, player names, or payloads.
 
 ## RuneLite privacy and configuration requirements
 
@@ -166,7 +175,7 @@ Synchronization is a third-party network feature. Its enable toggle must default
 
 > This feature submits your IP address to a 3rd-party server not controlled or verified by RuneLite developers
 
-Only shared tag metadata should be transmitted. Do not transmit bank contents, quantities, player locations, equipment, credentials, or unrelated player data.
+Only shared tag metadata, Inventory Setup documents, and the approved Combat Achievement snapshot should be transmitted. Do not transmit bank contents, quantities, player locations, equipment, credentials, session tokens, or unrelated player data.
 
 ## Reliability requirements
 

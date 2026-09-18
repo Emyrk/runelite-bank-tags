@@ -36,7 +36,7 @@ public interface BankTagsConfig extends Config, BankTagsSyncConfig
 
 	@ConfigSection(
 		name = "Synchronization",
-		description = "Share bank tags with a Group Ironmen group.",
+		description = "Share bank tags and Combat Achievement progress with a Group Ironmen group.",
 		position = 10,
 		closedByDefault = true
 	)

@@ -11,7 +11,7 @@ public interface BankTagsSyncConfig extends Config
 	@ConfigItem(
 		keyName = "enabled",
 		name = "Enable group sync",
-		description = "Synchronize bank tags with the configured Group Ironmen server.",
+		description = "Synchronize bank tags and exact Combat Achievement progress with the configured Group Ironmen server.",
 		warning = "This feature submits your IP address to a 3rd-party server not controlled or verified by RuneLite developers",
 		section = BankTagsConfig.SYNC_SECTION,
 		position = 11
@@ -103,7 +103,7 @@ public interface BankTagsSyncConfig extends Config
 	@ConfigItem(
 		keyName = "forceResync",
 		name = "Force resync",
-		description = "Immediately checks the server for bank tag and Inventory Setup changes. Tick to run once.",
+		description = "Immediately resynchronizes bank tags, Inventory Setups, and Combat Achievement progress. Tick to run once.",
 		section = BankTagsConfig.SYNC_SECTION,
 		position = 18
 	)
