@@ -212,7 +212,7 @@ public class TabInterface
 	private Widget newTab;
 
 	@Inject
-	private TabInterface(
+	TabInterface(
 		final Client client,
 		final ClientThread clientThread,
 		final BankTagsPlugin plugin,
@@ -392,14 +392,37 @@ public class TabInterface
 		tabScrollOffset = config.position();
 		scrollTab(0);
 
-		if (config.rememberTab() && !Strings.isNullOrEmpty(config.tab()))
+		restoreRememberedTagOnBankOpen();
+	}
+
+	void restoreRememberedTagOnBankOpen()
+	{
+		if (!config.rememberTab() || Strings.isNullOrEmpty(config.tab()))
 		{
-			// the server will resync the last opened vanilla tab when the bank is opened
-			client.setVarbit(VarbitID.BANK_CURRENTTAB, 0);
-			var tab = config.tab();
-			var layout = layoutManager.loadLayout(tab);
-			plugin.openTag(tab, layout);
+			return;
 		}
+
+		String rememberedTag = config.tab();
+		clientThread.invokeLater(() ->
+		{
+			// BANKMAIN_INIT can run additional search-toggle scripts after its pre-event. Restore the tag
+			// after initialization completes so those scripts cannot immediately clear it again.
+			if (!config.rememberTab() || !rememberedTag.equals(config.tab())
+				|| client.getWidget(InterfaceID.Bankmain.ITEMS_CONTAINER) == null)
+			{
+				return;
+			}
+			if (!TAGTABS.equals(rememberedTag) && tabManager.find(rememberedTag) == null)
+			{
+				config.tab("");
+				return;
+			}
+
+			// The server will resync the last opened vanilla tab when the bank is opened.
+			client.setVarbit(VarbitID.BANK_CURRENTTAB, 0);
+			Layout layout = TAGTABS.equals(rememberedTag) ? null : layoutManager.loadLayout(rememberedTag);
+			plugin.openTag(rememberedTag, layout);
+		});
 	}
 
 	public void deinit()
@@ -1266,6 +1289,10 @@ public class TabInterface
 
 	private void deleteTab(String tag)
 	{
+		if (tag.equals(config.tab()))
+		{
+			config.tab("");
+		}
 		if (tag.equals(activeTag))
 		{
 			closeTag(true);
@@ -1406,7 +1433,6 @@ public class TabInterface
 		activeOptions = 0;
 		tagTabActive = false;
 		plugin.openTag(null, null);
-		config.tab("");
 
 		if (relayout)
 		{
