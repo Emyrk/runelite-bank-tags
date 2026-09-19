@@ -7,6 +7,7 @@ import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.Client;
+import net.runelite.api.Player;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.util.Text;
 
@@ -25,7 +26,12 @@ public class CombatAchievementSnapshotService
 	@Nullable
 	public CombatAchievementProgress snapshot()
 	{
-		String playerName = normalizePlayerName(client.getUsername());
+		Player localPlayer = client.getLocalPlayer();
+		if (localPlayer == null)
+		{
+			return null;
+		}
+		String playerName = normalizePlayerName(localPlayer.getName());
 		if (playerName.isEmpty())
 		{
 			return null;

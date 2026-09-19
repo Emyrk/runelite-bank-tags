@@ -70,6 +70,23 @@ public class CombatAchievementSyncClientTest
 			body.getAsJsonArray("completedTaskIds").get(0).getAsString());
 	}
 
+	@Test
+	public void nonSuccessParsesProtocolErrorDetails()
+		throws Exception
+	{
+		server.enqueue(new MockResponse().setResponseCode(403)
+			.setBody("{\"error\":\"player_not_in_group\",\"message\":\"Character is not a group member\"}"));
+		Await callback = new Await();
+		client.putProgress(new CombatAchievementProgress("Display Name", 123, 456,
+			Collections.emptyList()), callback);
+
+		SyncFailure failure = callback.failure();
+		assertEquals(SyncFailure.Kind.BAD_REQUEST, failure.getKind());
+		assertEquals(403, failure.getHttpStatus());
+		assertEquals("player_not_in_group", failure.getErrorCode());
+		assertEquals("Character is not a group member", failure.getMessage());
+	}
+
 	private static final class Await implements CombatAchievementSyncClient.Callback
 	{
 		private final CountDownLatch latch = new CountDownLatch(1);
@@ -80,6 +97,11 @@ public class CombatAchievementSyncClientTest
 		{
 			assertTrue(latch.await(5, TimeUnit.SECONDS));
 			assertNull(failure);
+		}
+		SyncFailure failure() throws InterruptedException
+		{
+			assertTrue(latch.await(5, TimeUnit.SECONDS));
+			return failure;
 		}
 	}
 }

@@ -16,6 +16,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
+import okhttp3.ResponseBody;
 
 /** Asynchronous client for exact Combat Achievement progress uploads. */
 @Slf4j
@@ -63,16 +64,24 @@ public class CombatAchievementSyncClient
 			@Override
 			public void onResponse(Call call, Response response)
 			{
+				int status = response.code();
+				String body;
 				try (Response ignored = response)
 				{
-					if (response.isSuccessful())
-					{
-						callback.onSuccess();
-						return;
-					}
-					callback.onFailure(new SyncFailure(SyncFailure.kindForStatus(response.code()),
-						response.code(), null, null, null, null));
+					ResponseBody responseBody = response.body();
+					body = responseBody == null ? "" : responseBody.string();
 				}
+				catch (IOException ex)
+				{
+					callback.onFailure(SyncFailure.network(ex.getMessage()));
+					return;
+				}
+				if (status >= 200 && status < 300)
+				{
+					callback.onSuccess();
+					return;
+				}
+				callback.onFailure(json.parseErrorBody(status, body));
 			}
 		});
 	}

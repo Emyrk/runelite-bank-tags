@@ -80,6 +80,59 @@ public class CombatAchievementSyncCoordinatorTest
 	}
 
 	@Test
+	public void loggedInSnapshotRetriesWhenLocalPlayerIsInitiallyUnavailable()
+	{
+		when(client.getGameState()).thenReturn(GameState.LOGIN_SCREEN);
+		when(snapshots.snapshot()).thenReturn(null, progress("retry"));
+		coordinator.start();
+
+		coordinator.onGameStateChanged(GameState.LOGGED_IN);
+
+		assertEquals(1, executor.pendingCount());
+		assertEquals(CombatAchievementSyncCoordinator.SNAPSHOT_RETRY_DELAY_SECONDS, executor.nextDelaySeconds());
+		verify(syncClient, never()).putProgress(any(), any());
+
+		executor.runDue(CombatAchievementSyncCoordinator.SNAPSHOT_RETRY_DELAY_SECONDS);
+
+		verify(syncClient).putProgress(any(CombatAchievementProgress.class), any());
+		assertEquals(0, executor.pendingCount());
+	}
+
+	@Test
+	public void loggedInSnapshotRetryIsBounded()
+	{
+		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
+		when(snapshots.snapshot()).thenReturn(null);
+
+		coordinator.start();
+		for (int attempt = 0; attempt < CombatAchievementSyncCoordinator.MAX_SNAPSHOT_RETRIES; attempt++)
+		{
+			assertEquals(1, executor.pendingCount());
+			executor.runDue(CombatAchievementSyncCoordinator.SNAPSHOT_RETRY_DELAY_SECONDS);
+		}
+
+		assertEquals(0, executor.pendingCount());
+		verify(snapshots, times(CombatAchievementSyncCoordinator.MAX_SNAPSHOT_RETRIES + 1)).snapshot();
+		verify(syncClient, never()).putProgress(any(), any());
+	}
+
+	@Test
+	public void logoutCancelsPendingSnapshotRetry()
+	{
+		when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
+		when(snapshots.snapshot()).thenReturn(null);
+		coordinator.start();
+		assertEquals(1, executor.pendingCount());
+
+		coordinator.onGameStateChanged(GameState.LOGIN_SCREEN);
+		executor.runDue(CombatAchievementSyncCoordinator.SNAPSHOT_RETRY_DELAY_SECONDS);
+
+		assertEquals(0, executor.pendingCount());
+		verify(snapshots, times(1)).snapshot();
+		verify(syncClient, never()).putProgress(any(), any());
+	}
+
+	@Test
 	public void relevantVarpDebouncesAndLatestSnapshotFollowsInflightUpload()
 	{
 		CombatAchievementProgress first = progress("first");
@@ -112,12 +165,13 @@ public class CombatAchievementSyncCoordinatorTest
 		when(snapshots.snapshot()).thenReturn(null, progress("points"));
 		coordinator.start();
 		coordinator.onGameStateChanged(GameState.LOGGED_IN);
+		assertEquals(1, executor.pendingCount());
 
 		VarbitChanged changed = new VarbitChanged();
 		changed.setVarbitId(VarbitID.CA_POINTS);
 		coordinator.onVarbitChanged(changed);
 
-		assertEquals(1, executor.pendingCount());
+		assertEquals(2, executor.pendingCount());
 		executor.runDue(1);
 		verify(syncClient).putProgress(any(CombatAchievementProgress.class), any());
 	}
@@ -126,6 +180,7 @@ public class CombatAchievementSyncCoordinatorTest
 	public void unrelatedVarpDoesNotScheduleUpload()
 	{
 		when(client.getGameState()).thenReturn(GameState.LOGIN_SCREEN);
+		when(snapshots.snapshot()).thenReturn(progress("login"));
 		coordinator.start();
 		coordinator.onGameStateChanged(GameState.LOGGED_IN);
 

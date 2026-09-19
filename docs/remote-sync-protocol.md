@@ -157,7 +157,7 @@ Combat Achievement progress is an independent latest-only snapshot. It uses the 
 Client rules:
 
 - `schemaVersion` is `1`.
-- `playerName` is the normalized, tag-free value of `Client.getUsername()`, preserving display case.
+- `playerName` is the normalized, tag-free value of the logged-in character display name from `Client.getLocalPlayer().getName()`, preserving display case. Deprecated `Client.getUsername()` login identity is never sent.
 - `clientRevision` is `Client.getRevision()`.
 - `achievementPoints` is the nonnegative total read from `Client.getVarbitValue(VarbitID.CA_POINTS)`.
 - `completedTaskIds` is the exact ordered subset of the explicit RuneLite `VarbitID.CA_TASK_*_COMPLETED` catalog whose varbits are nonzero. Names are sent, not numeric varbit values.
