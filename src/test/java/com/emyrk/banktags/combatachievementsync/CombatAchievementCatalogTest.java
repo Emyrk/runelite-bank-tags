@@ -29,8 +29,11 @@ public class CombatAchievementCatalogTest
 	@Test
 	public void completionVarpsAreExplicitlyRecognized()
 	{
+		assertEquals(21, CombatAchievementCatalog.completionVarpIds().size());
+		assertEquals((Integer) VarPlayerID.CA_TASK_COMPLETED_0, CombatAchievementCatalog.completionVarpIds().get(0));
+		assertEquals((Integer) VarPlayerID.CA_TASK_COMPLETED_20, CombatAchievementCatalog.completionVarpIds().get(20));
 		assertTrue(CombatAchievementCatalog.isCompletionVarp(VarPlayerID.CA_TASK_COMPLETED_0));
-		assertTrue(CombatAchievementCatalog.isCompletionVarp(VarPlayerID.CA_TASK_COMPLETED_19));
+		assertTrue(CombatAchievementCatalog.isCompletionVarp(VarPlayerID.CA_TASK_COMPLETED_20));
 		assertFalse(CombatAchievementCatalog.isCompletionVarp(-1));
 	}
 }

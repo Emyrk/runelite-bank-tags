@@ -6,18 +6,18 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 
-/** Immutable exact Combat Achievement completion snapshot for one player. */
+/** Immutable packed Combat Achievement completion snapshot for one player. */
 public final class CombatAchievementProgress
 {
-	public static final int SCHEMA_VERSION = 1;
+	public static final int SCHEMA_VERSION = 2;
 
 	private final String playerName;
 	private final int clientRevision;
 	private final int achievementPoints;
-	private final List<String> completedTaskIds;
+	private final List<Integer> completedTaskIds;
 
 	public CombatAchievementProgress(String playerName, int clientRevision, int achievementPoints,
-		List<String> completedTaskIds)
+		List<Integer> completedTaskIds)
 	{
 		if (achievementPoints < 0)
 		{
@@ -45,7 +45,7 @@ public final class CombatAchievementProgress
 		return achievementPoints;
 	}
 
-	public List<String> getCompletedTaskIds()
+	public List<Integer> getCompletedTaskIds()
 	{
 		return completedTaskIds;
 	}

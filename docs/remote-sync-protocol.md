@@ -136,17 +136,17 @@ Folder group and order revisions are independent from tag manifest revisions. `o
 
 The folder order request body is `{ "schemaVersion": 1, "orderedFolderIds": [...] }`. Conditional-write and error semantics match the tag routes. Folder state is stored separately in SQLite by the private group-ironmen server. The browser and RuneLite keep expanded or collapsed state locally and never send it.
 
-#### Combat Achievement progress extension (v1)
+#### Combat Achievement progress extension (v2)
 
 Combat Achievement progress is an independent latest-only snapshot. It uses the same authenticated group scope and does not change bank-tag, folder, or Inventory Setup revisions.
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "playerName": "Display Name",
   "clientRevision": 123,
   "achievementPoints": 456,
-  "completedTaskIds": ["CA_TASK_ABBERANT_SPECTRE_KILLCOUNT_1_COMPLETED"]
+  "completedTaskIds": [0, 523]
 }
 ```
 
@@ -156,17 +156,17 @@ Combat Achievement progress is an independent latest-only snapshot. It uses the 
 
 Client rules:
 
-- `schemaVersion` is `1`.
+- `schemaVersion` is `2`. Servers continue accepting schema `1` snapshots from older plugin builds.
 - `playerName` is the normalized, tag-free value of the logged-in character display name from `Client.getLocalPlayer().getName()`, preserving display case. Deprecated `Client.getUsername()` login identity is never sent.
 - `clientRevision` is `Client.getRevision()`.
 - `achievementPoints` is the nonnegative total read from `Client.getVarbitValue(VarbitID.CA_POINTS)`.
-- `completedTaskIds` is the exact ordered subset of the explicit RuneLite `VarbitID.CA_TASK_*_COMPLETED` catalog whose varbits are nonzero. Names are sent, not numeric varbit values.
+- `completedTaskIds` contains numeric task IDs decoded from the packed `VarPlayerID.CA_TASK_COMPLETED_0..20` values. For completion block `b` and set bit `n`, the task ID is `b * 32 + n`. IDs are ordered by block and bit.
 - The plugin uploads a full snapshot at startup when already logged in and after every `GameStateChanged.LOGGED_IN` event. Relevant completion varp, task varbit, and `VarbitID.CA_POINTS` changes are debounced.
 - Requests are serialized. If state changes while a request is in flight, one fresh latest snapshot follows it.
 - Leaving `LOGGED_IN`, disabling sync, changing credentials, or shutting down cancels pending and in-flight work. `Force resync` queues an immediate full snapshot.
 - Combat Achievement synchronization uses the existing `enabled` setting and group credentials. There is no separate config key or toggle.
 
-The source-of-truth request fixture is `src/test/resources/fixtures/sync/combat-achievements/v1/progress-request.json`.
+The source-of-truth request fixture is `src/test/resources/fixtures/sync/combat-achievements/v2/progress-request.json`. The v1 fixture remains frozen for compatibility.
 
 #### Server storage
 

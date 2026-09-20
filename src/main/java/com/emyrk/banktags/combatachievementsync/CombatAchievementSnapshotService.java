@@ -37,12 +37,17 @@ public class CombatAchievementSnapshotService
 			return null;
 		}
 
-		List<String> completed = new ArrayList<>();
-		for (CombatAchievementCatalog.Task task : CombatAchievementCatalog.tasks())
+		List<Integer> completed = new ArrayList<>();
+		List<Integer> completionVarps = CombatAchievementCatalog.completionVarpIds();
+		for (int block = 0; block < completionVarps.size(); block++)
 		{
-			if (client.getVarbitValue(task.getVarbitId()) != 0)
+			int packed = client.getVarpValue(completionVarps.get(block));
+			for (int bit = 0; bit < Integer.SIZE; bit++)
 			{
-				completed.add(task.getId());
+				if (((packed >>> bit) & 1) != 0)
+				{
+					completed.add(block * Integer.SIZE + bit);
+				}
 			}
 		}
 		int achievementPoints = Math.max(0, client.getVarbitValue(VarbitID.CA_POINTS));

@@ -15,25 +15,24 @@ public class CombatAchievementSyncJsonTest
 	public void requestMatchesProtocolFixture()
 	{
 		Gson gson = new Gson();
-		CombatAchievementProgress progress = new CombatAchievementProgress("Display Name", 123, 456, Arrays.asList(
-			"CA_TASK_ABBERANT_SPECTRE_KILLCOUNT_1_COMPLETED",
-			"CA_TASK_LIZARDMAN_SHAMAN_PERFECTION_1_COMPLETED"));
+		CombatAchievementProgress progress = new CombatAchievementProgress("Display Name", 123, 456,
+			Arrays.asList(0, 523));
 		JsonElement actual = gson.fromJson(new CombatAchievementSyncJson(gson).progressRequest(progress), JsonElement.class);
 		JsonElement expected = gson.fromJson(new InputStreamReader(getClass().getResourceAsStream(
-			"/fixtures/sync/combat-achievements/v1/progress-request.json"), StandardCharsets.UTF_8), JsonElement.class);
+			"/fixtures/sync/combat-achievements/v2/progress-request.json"), StandardCharsets.UTF_8), JsonElement.class);
 		assertEquals(expected, actual);
 	}
 
 	@Test(expected = IllegalArgumentException.class)
 	public void achievementPointsMustBeNonnegative()
 	{
-		new CombatAchievementProgress("Display Name", 123, -1, Arrays.asList("one"));
+		new CombatAchievementProgress("Display Name", 123, -1, Arrays.asList(1));
 	}
 
 	@Test(expected = UnsupportedOperationException.class)
 	public void completedTaskIdsAreImmutable()
 	{
-		new CombatAchievementProgress("Display Name", 123, 456, Arrays.asList("one"))
-			.getCompletedTaskIds().add("two");
+		new CombatAchievementProgress("Display Name", 123, 456, Arrays.asList(1))
+			.getCompletedTaskIds().add(2);
 	}
 }

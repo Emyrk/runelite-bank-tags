@@ -5,6 +5,7 @@ import java.util.Arrays;
 import net.runelite.api.Client;
 import net.runelite.api.Player;
 import net.runelite.api.gameval.VarbitID;
+import net.runelite.api.gameval.VarPlayerID;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
@@ -23,17 +24,16 @@ public class CombatAchievementSnapshotServiceTest
 		when(localPlayer.getName()).thenReturn(" <col=ff0000>Display\u00a0 Name</col> ");
 		when(client.getRevision()).thenReturn(123);
 		when(client.getVarbitValue(VarbitID.CA_POINTS)).thenReturn(456);
-		when(client.getVarbitValue(VarbitID.CA_TASK_ABBERANT_SPECTRE_KILLCOUNT_1_COMPLETED)).thenReturn(1);
-		when(client.getVarbitValue(VarbitID.CA_TASK_LIZARDMAN_SHAMAN_PERFECTION_1_COMPLETED)).thenReturn(1);
+		when(client.getVarpValue(VarPlayerID.CA_TASK_COMPLETED_0)).thenReturn((1 << 0) | (1 << 31));
+		when(client.getVarpValue(VarPlayerID.CA_TASK_COMPLETED_16)).thenReturn(1 << 11);
+		when(client.getVarpValue(VarPlayerID.CA_TASK_COMPLETED_20)).thenReturn(1 << 31);
 
 		CombatAchievementProgress progress = new CombatAchievementSnapshotService(client).snapshot();
 
 		assertEquals("Display Name", progress.getPlayerName());
 		assertEquals(123, progress.getClientRevision());
 		assertEquals(456, progress.getAchievementPoints());
-		assertEquals(Arrays.asList(
-			"CA_TASK_ABBERANT_SPECTRE_KILLCOUNT_1_COMPLETED",
-			"CA_TASK_LIZARDMAN_SHAMAN_PERFECTION_1_COMPLETED"), progress.getCompletedTaskIds());
+		assertEquals(Arrays.asList(0, 31, 523, 671), progress.getCompletedTaskIds());
 	}
 
 	@Test

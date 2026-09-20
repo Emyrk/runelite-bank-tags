@@ -54,7 +54,7 @@ public class CombatAchievementSyncClientTest
 		server.enqueue(new MockResponse().setResponseCode(204));
 		Await callback = new Await();
 		client.putProgress(new CombatAchievementProgress("Display Name", 123, 456,
-			Collections.singletonList("CA_TASK_ABBERANT_SPECTRE_KILLCOUNT_1_COMPLETED")), callback);
+			Collections.singletonList(523)), callback);
 		callback.success();
 
 		RecordedRequest request = server.takeRequest();
@@ -62,12 +62,11 @@ public class CombatAchievementSyncClientTest
 		assertEquals("/api/group/gim%20group/combat-achievements/snapshot", request.getPath());
 		assertEquals("token", request.getHeader("Authorization"));
 		JsonObject body = new Gson().fromJson(request.getBody().readUtf8(), JsonObject.class);
-		assertEquals(1, body.get("schemaVersion").getAsInt());
+		assertEquals(2, body.get("schemaVersion").getAsInt());
 		assertEquals("Display Name", body.get("playerName").getAsString());
 		assertEquals(123, body.get("clientRevision").getAsInt());
 		assertEquals(456, body.get("achievementPoints").getAsInt());
-		assertEquals("CA_TASK_ABBERANT_SPECTRE_KILLCOUNT_1_COMPLETED",
-			body.getAsJsonArray("completedTaskIds").get(0).getAsString());
+		assertEquals(523, body.getAsJsonArray("completedTaskIds").get(0).getAsInt());
 	}
 
 	@Test

@@ -10,7 +10,7 @@ import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 
-/** JSON encoder for the Combat Achievement progress v1 request. */
+/** JSON encoder for the Combat Achievement progress v2 request. */
 @Singleton
 public class CombatAchievementSyncJson
 {
@@ -30,7 +30,7 @@ public class CombatAchievementSyncJson
 		object.addProperty("clientRevision", progress.getClientRevision());
 		object.addProperty("achievementPoints", progress.getAchievementPoints());
 		JsonArray completed = new JsonArray();
-		for (String taskId : progress.getCompletedTaskIds())
+		for (Integer taskId : progress.getCompletedTaskIds())
 		{
 			completed.add(taskId);
 		}

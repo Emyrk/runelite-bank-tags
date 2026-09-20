@@ -142,7 +142,7 @@ public class CombatAchievementSyncCoordinatorTest
 		coordinator.start();
 
 		VarbitChanged changed = new VarbitChanged();
-		changed.setVarpId(VarPlayerID.CA_TASK_COMPLETED_0);
+		changed.setVarpId(VarPlayerID.CA_TASK_COMPLETED_20);
 		coordinator.onVarbitChanged(changed);
 		coordinator.onVarbitChanged(changed);
 		assertEquals(1, executor.pendingCount());
@@ -225,6 +225,7 @@ public class CombatAchievementSyncCoordinatorTest
 
 	private static CombatAchievementProgress progress(String id)
 	{
-		return new CombatAchievementProgress("Display Name", 123, 456, Collections.singletonList(id));
+		return new CombatAchievementProgress("Display Name", 123, 456,
+			Collections.singletonList(id.hashCode() & Integer.MAX_VALUE));
 	}
 }

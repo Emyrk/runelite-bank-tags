@@ -441,7 +441,7 @@ public final class CombatAchievementCatalog
 	));
 
 	private static final Set<Integer> TASK_VARBIT_IDS;
-	private static final Set<Integer> COMPLETION_VARP_IDS = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
+	private static final List<Integer> COMPLETION_VARP_IDS = Collections.unmodifiableList(Arrays.asList(
 		VarPlayerID.CA_TASK_COMPLETED_0, VarPlayerID.CA_TASK_COMPLETED_1,
 		VarPlayerID.CA_TASK_COMPLETED_2, VarPlayerID.CA_TASK_COMPLETED_3,
 		VarPlayerID.CA_TASK_COMPLETED_4, VarPlayerID.CA_TASK_COMPLETED_5,
@@ -451,7 +451,10 @@ public final class CombatAchievementCatalog
 		VarPlayerID.CA_TASK_COMPLETED_12, VarPlayerID.CA_TASK_COMPLETED_13,
 		VarPlayerID.CA_TASK_COMPLETED_14, VarPlayerID.CA_TASK_COMPLETED_15,
 		VarPlayerID.CA_TASK_COMPLETED_16, VarPlayerID.CA_TASK_COMPLETED_17,
-		VarPlayerID.CA_TASK_COMPLETED_18, VarPlayerID.CA_TASK_COMPLETED_19)));
+		VarPlayerID.CA_TASK_COMPLETED_18, VarPlayerID.CA_TASK_COMPLETED_19,
+		VarPlayerID.CA_TASK_COMPLETED_20));
+	private static final Set<Integer> COMPLETION_VARP_ID_SET =
+		Collections.unmodifiableSet(new HashSet<>(COMPLETION_VARP_IDS));
 
 	static
 	{
@@ -472,9 +475,14 @@ public final class CombatAchievementCatalog
 		return TASKS;
 	}
 
+	public static List<Integer> completionVarpIds()
+	{
+		return COMPLETION_VARP_IDS;
+	}
+
 	public static boolean isCompletionVarp(int varpId)
 	{
-		return COMPLETION_VARP_IDS.contains(varpId);
+		return COMPLETION_VARP_ID_SET.contains(varpId);
 	}
 
 	public static boolean isTaskVarbit(int varbitId)
