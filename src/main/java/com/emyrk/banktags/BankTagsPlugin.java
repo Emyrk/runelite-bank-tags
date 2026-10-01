@@ -29,7 +29,9 @@ package com.emyrk.banktags;
 import com.google.common.collect.Lists;
 import com.google.common.primitives.Shorts;
 import com.google.inject.Binder;
+import com.google.inject.Module;
 import com.google.inject.Provides;
+import com.google.inject.util.Providers;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashSet;
@@ -199,6 +201,17 @@ public class BankTagsPlugin extends Plugin implements BankTagsService
 	public void configure(Binder binder)
 	{
 		binder.bind(BankTagsService.class).toInstance(this);
+	}
+
+	@Override
+	protected Module getPublicModule()
+	{
+		return binder ->
+		{
+			binder.bind(BankTagsService.class).toProvider(Providers.of(this));
+			binder.bind(LayoutManager.class).toProvider(Providers.of(layoutManager));
+			binder.bind(TagManager.class).toProvider(Providers.of(tagManager));
+		};
 	}
 
 	@Provides
