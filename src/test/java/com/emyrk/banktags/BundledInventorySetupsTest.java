@@ -1,8 +1,11 @@
 package com.emyrk.banktags;
 
+import com.emyrk.banktags.inventorysync.InventorySetupSyncCoordinator;
+import com.emyrk.banktags.tabs.LayoutManager;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import inventorysetups.InventorySetupsPlugin;
+import java.lang.reflect.Field;
 import net.runelite.client.plugins.PluginDependency;
 import net.runelite.client.plugins.PluginDescriptor;
 import org.junit.Test;
@@ -10,6 +13,7 @@ import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
 
 public class BundledInventorySetupsTest
 {
@@ -28,13 +32,30 @@ public class BundledInventorySetupsTest
 	}
 
 	@Test
-	public void bankTagsExtendedExposesPluginInstanceToCompanionPlugins()
+	public void bankTagsExtendedExposesDependenciesToCompanionPlugins() throws Exception
 	{
 		BankTagsPlugin plugin = new BankTagsPlugin();
+		InventorySetupSyncCoordinator syncCoordinator = mock(InventorySetupSyncCoordinator.class);
+		LayoutManager layoutManager = mock(LayoutManager.class);
+		TagManager tagManager = mock(TagManager.class);
+		setField(plugin, "inventorySetupSyncCoordinator", syncCoordinator);
+		setField(plugin, "layoutManager", layoutManager);
+		setField(plugin, "tagManager", tagManager);
+
 		Injector injector = Guice.createInjector(plugin.getPublicModule());
 
 		assertSame(plugin, injector.getInstance(BankTagsPlugin.class));
 		assertSame(plugin, injector.getInstance(BankTagsService.class));
+		assertSame(syncCoordinator, injector.getInstance(InventorySetupSyncCoordinator.class));
+		assertSame(layoutManager, injector.getInstance(LayoutManager.class));
+		assertSame(tagManager, injector.getInstance(TagManager.class));
+	}
+
+	private static void setField(Object target, String name, Object value) throws Exception
+	{
+		Field field = target.getClass().getDeclaredField(name);
+		field.setAccessible(true);
+		field.set(target, value);
 	}
 
 	@Test
