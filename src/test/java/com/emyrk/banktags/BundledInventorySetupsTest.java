@@ -1,12 +1,14 @@
 package com.emyrk.banktags;
 
+import com.google.inject.Guice;
+import com.google.inject.Injector;
 import inventorysetups.InventorySetupsPlugin;
 import net.runelite.client.plugins.PluginDependency;
 import net.runelite.client.plugins.PluginDescriptor;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 public class BundledInventorySetupsTest
@@ -26,9 +28,13 @@ public class BundledInventorySetupsTest
 	}
 
 	@Test
-	public void bankTagsExtendedExposesServicesToCompanionPlugins()
+	public void bankTagsExtendedExposesPluginInstanceToCompanionPlugins()
 	{
-		assertNotNull(new BankTagsPlugin().getPublicModule());
+		BankTagsPlugin plugin = new BankTagsPlugin();
+		Injector injector = Guice.createInjector(plugin.getPublicModule());
+
+		assertSame(plugin, injector.getInstance(BankTagsPlugin.class));
+		assertSame(plugin, injector.getInstance(BankTagsService.class));
 	}
 
 	@Test
