@@ -88,3 +88,12 @@ Do not rename the config group or keys without a migration. Preserve tag standar
 4. Add or update tests before claiming the code is ready.
 5. Run `./gradlew test` and report the exact result.
 6. Ask the user to verify the behavior in-game through the development client.
+
+## Context & memory
+
+- When compacting, always preserve the list of modified files, the task's
+  acceptance criteria, the build/test command, the PR URL, and the
+  `STATUS:` line contract.
+- Auto memory (`~/.claude/projects/<repo>/memory/`) holds Claude-written
+  notes — corrections and confirmed approaches, one lesson per file. Don't
+  save what the repo, its docs, or git history already record.
